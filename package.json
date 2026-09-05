@@ -1256,6 +1256,7 @@
         }
     },
     "scripts": {
+        "build": "node scripts/build.cjs",
         "vscode:prepublish": "webpack --mode production",
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
@@ -1272,9 +1273,12 @@
         "@typescript-eslint/eslint-plugin": "^5.42.0",
         "@typescript-eslint/parser": "^5.42.0",
         "@vscode/test-electron": "^2.2.0",
+        "@vscode/vsce": "3.9.2",
+        "adm-zip": "0.6.0",
         "eslint": "^8.26.0",
         "mocha": "^10.1.0",
         "typescript": "^4.8.4",
+        "webpack": "5.110.3",
         "webpack-cli": "^5.1.4"
     },
     "dependencies": {

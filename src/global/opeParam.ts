@@ -53,8 +53,8 @@ class OpeParam {
     // path of property-init.json
     private _propertyInitPath: AbsPath = OpeParamDefaults.propertyInitPath;
 
-    private _firstSrcTopModule: FirstTopModuleDesc = OpeParamDefaults.topModule;
-    private _firstSimTopModule: FirstTopModuleDesc = OpeParamDefaults.topModule;
+    private _firstSrcTopModule: FirstTopModuleDesc = { ...OpeParamDefaults.topModule };
+    private _firstSimTopModule: FirstTopModuleDesc = { ...OpeParamDefaults.topModule };
     private _openMode: 'folder' | 'file' = 'folder';
 
     public get os() : string {

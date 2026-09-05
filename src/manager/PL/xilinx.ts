@@ -14,6 +14,7 @@ import { HardwareOutput, MainOutput, ReportType } from '../../global/outputChann
 import { debounce, getPIDsWithName, killProcess } from '../../global/util';
 import { t } from '../../i18n';
 import { HdlFileProjectType } from '../../hdlParser/common';
+import { encodeTclScript, loadTclScript, quoteTcl } from './tcl';
 
 interface XilinxCustom {
     ipRepo: AbsPath, 
@@ -174,13 +175,13 @@ class XilinxOperation {
 
         const tclPath = hdlPath.join(this.xilinxPath, 'launch.tcl');
         scripts.push(this.getRefreshXprDesignSourceCommand());
-        scripts.push(`file delete ${tclPath} -force`);
+        scripts.push(`file delete -force ${quoteTcl(tclPath)}`);
         const tclCommands = scripts.join('\n') + '\n';
-        hdlFile.writeFile(tclPath, tclCommands);
+        hdlFile.writeFile(tclPath, encodeTclScript(tclCommands));
 
         const argu = `-notrace -nolog -nojournal`;
         context.path = this.updateVivadoPath();
-        const cmd = `${context.path} -mode tcl -s ${tclPath} ${argu}`;
+        const cmd = `${context.path} -mode tcl -s "${tclPath}" ${argu}`;
         
         const _this = this;
         
@@ -321,7 +322,7 @@ class XilinxOperation {
 
     public open(path: AbsPath, scripts: string[]) {
         scripts.push(`set_param general.maxThreads 8`);
-        scripts.push(`open_project ${path} -quiet`);
+        scripts.push(`open_project ${quoteTcl(path)} -quiet`);
     }
 
     /**
@@ -418,11 +419,11 @@ class XilinxOperation {
                 case HdlFileProjectType.LocalLib:
                 case HdlFileProjectType.RemoteLib:
                     // src 和 library 加入 source_1 设计源
-                    scripts.push(`add_file ${hdlFile.path} -quiet`);
+                    scripts.push(`add_files [list ${quoteTcl(hdlFile.path)}]`);
                     break;
                 case HdlFileProjectType.Sim:
                     // sim 加入 sim_1 设计源
-                    scripts.push(`add_file -fileset sim_1 ${hdlFile.path} -quiet`);
+                    scripts.push(`add_files -fileset sim_1 [list ${quoteTcl(hdlFile.path)}]`);
                     break;
                 case HdlFileProjectType.IP:
                 case HdlFileProjectType.Primitive:
@@ -433,7 +434,7 @@ class XilinxOperation {
             }
         }
 
-        scripts.push(`add_files -fileset constrs_1 ${this.datPath} -quiet`);
+        scripts.push(`add_files -fileset constrs_1 [list ${quoteTcl(this.datPath)}]`);
 
         if (this.topMod.src !== '') {
             scripts.push(`set_property top ${this.topMod.src} [current_fileset]`);
@@ -442,17 +443,12 @@ class XilinxOperation {
             scripts.push(`set_property top ${this.topMod.sim} [get_filesets sim_1]`);
         }
 
-        let script = '';
-        for (let i = 0; i < scripts.length; i++) {
-            const content = scripts[i];
-            script += content + '\n';
-        }
+        let script = scripts.join('\n') + '\n';
 
         const scriptPath = `${this.xilinxPath}/refresh.tcl`;
-        script += `file delete ${scriptPath} -force\n`;
-        hdlFile.writeFile(scriptPath, script);
-        const cmd = `source ${scriptPath} -quiet`;
-        return cmd;
+        script += `file delete -force ${quoteTcl(scriptPath)}\n`;
+        hdlFile.writeFile(scriptPath, encodeTclScript(script));
+        return encodeTclScript(loadTclScript(scriptPath)).trim();
     }
 
     /**
