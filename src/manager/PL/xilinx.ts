@@ -61,9 +61,12 @@ interface BootInfo {
 class XilinxOperation {
     guiLaunched: boolean;
     guiPid: number;
+    private diagnosticProjectPath = '';
     constructor() {
         this.guiLaunched = false;
         this.guiPid = -1;
+
+        HardwareOutput.report(`========== Vivado 操作管理器初始化（尚未启动工具） ==========\n工作区：${opeParam.workspacePath}\n插件目录：${opeParam.extensionPath}`, { level: ReportType.Info });
     }
 
     public get xipRepo(): XilinxIP[] {
@@ -141,6 +144,7 @@ class XilinxOperation {
      * @param context
      */
     public async launch(context: PLContext): Promise<string | undefined> {
+        HardwareOutput.report(`收到 Vivado 启动请求；工程搜索目录：${this.prjPath}；原进程 PID：${context.process?.pid ?? '无'}；原进程退出码：${context.process?.exitCode ?? '未退出或无进程'}`, { level: ReportType.Info });
         this.guiLaunched = false;
         this.guiPid = -1;
 
@@ -150,6 +154,7 @@ class XilinxOperation {
         const prjFiles = hdlFile.pickFileRecursive(prjFilePath, 
             filePath => filePath.endsWith('.xpr')
         );
+        HardwareOutput.report(`工程搜索目录：${prjFilePath}；发现 ${prjFiles.length} 个 Vivado 工程`, { level: ReportType.Info });
 
         if (prjFiles.length) {
             if (prjFiles.length > 1) {
@@ -159,6 +164,9 @@ class XilinxOperation {
                 });
                 if (selection) {
                     this.open(selection, scripts);
+                } else {
+                    HardwareOutput.report('用户取消工程选择，本次启动已取消。', { level: ReportType.Info });
+                    return undefined;
                 }
             } else {
                 prjFilePath = prjFiles[0];
@@ -166,7 +174,8 @@ class XilinxOperation {
             }
         } else {
             if (!hdlDir.mkdir(this.prjInfo.path)) {
-                vscode.window.showErrorMessage(`mkdir ${this.prjInfo.path} failed`);
+                HardwareOutput.report(`启动中止：创建工程目录失败：${this.prjInfo.path}`, { level: ReportType.Error });
+                vscode.window.showErrorMessage(`创建工程目录失败：${this.prjInfo.path}`);
                 return undefined;
             }
 
@@ -177,11 +186,13 @@ class XilinxOperation {
         scripts.push(this.getRefreshXprDesignSourceCommand());
         scripts.push(`file delete -force ${quoteTcl(tclPath)}`);
         const tclCommands = scripts.join('\n') + '\n';
-        hdlFile.writeFile(tclPath, encodeTclScript(tclCommands));
+        const launchScriptWritten = hdlFile.writeFile(tclPath, encodeTclScript(tclCommands));
+        HardwareOutput.report(`启动脚本写入${launchScriptWritten ? '完成' : '失败'}：${tclPath}\n计划启动命令：\n${tclCommands}`, { level: launchScriptWritten ? ReportType.Info : ReportType.Error });
 
         const argu = `-notrace -nolog -nojournal`;
         context.path = this.updateVivadoPath();
         const cmd = `${context.path} -mode tcl -s "${tclPath}" ${argu}`;
+        HardwareOutput.report(`启动脚本：${tclPath}\n脚本编码：ASCII 包装 / UTF-8 解码\n执行命令：${cmd}\n注意：收到进程输出不代表工程初始化完成，请检查后续 Vivado 输出。`, { level: ReportType.Info });
         
         const _this = this;
         
@@ -191,34 +202,46 @@ class XilinxOperation {
 
         function launchScript(pids: number[]): Promise<ChildProcessWithoutNullStreams | undefined> {
             if (!opeParam.workspacePath) {
+                HardwareOutput.report('启动中止：工作区路径为空，未创建 Vivado 进程。', { level: ReportType.Error });
                 return Promise.resolve(undefined);
             }
 
             const vivadoPids = new Set<number>(pids);
             const vivadoProcess = spawn(cmd, [], { shell: true, stdio: 'pipe', cwd: opeParam.workspacePath });
+            HardwareOutput.report(`已请求创建 Vivado 启动进程；Shell PID：${vivadoProcess.pid ?? '尚未分配'}；工作目录：${opeParam.workspacePath}；工程：${_this.diagnosticProjectPath}。尚未确认工程加载成功。`, { level: ReportType.Info });
             let status: 'pending' | 'fulfilled' = 'pending';
 
             vivadoProcess.on('close', () => {
+                HardwareOutput.report(`Vivado 启动进程通道已关闭；PID：${vivadoProcess.pid ?? '未知'}`, { level: ReportType.Info });
                 onVivadoClose();            
             });
-            vivadoProcess.on('exit', () => {
+            vivadoProcess.on('exit', (code, signal) => {
+                HardwareOutput.report(`Vivado 启动进程已退出：退出码=${code}，信号=${signal ?? '无'}`, {
+                    level: code === 0 ? ReportType.Info : ReportType.Error
+                });
                 onVivadoClose();
             });
             vivadoProcess.on('disconnect', () => {
+                HardwareOutput.report(`Vivado 启动进程连接已断开；PID：${vivadoProcess.pid ?? '未知'}`, { level: ReportType.Warn });
                 onVivadoClose();
             });
 
             return new Promise(resolve => {
+                vivadoProcess.once('error', error => {
+                    HardwareOutput.report(`无法启动 Vivado 进程：${error.message}\n执行命令：${cmd}`, { level: ReportType.Error });
+                    resolve(undefined);
+                });
+                vivadoProcess.once('close', () => resolve(undefined));
                 vivadoProcess.stdout.on('data', async data => {
                     const message: string = _this.handleMessage(data.toString(), status);                                        
                     if (status === 'pending') {
-                        HardwareOutput.clear();
                         HardwareOutput.show();
                         const pids = await getPIDsWithName('vivado');
                         const newPid = pids.find(p => !vivadoPids.has(p));
                         if (newPid) {
                             _this.guiPid = newPid;
                         }
+                        HardwareOutput.report(`Vivado 进程已响应；检测到的 Vivado PID：${newPid ?? '未识别'}。工程加载结果请查看下方输出。`, { level: ReportType.Info });
                         resolve(vivadoProcess);
                     }
                     HardwareOutput.report(message, {
@@ -234,6 +257,7 @@ class XilinxOperation {
                     HardwareOutput.show();
                     if (status === 'pending') {
                         // pending 阶段就出现 stderr 说明启动失败
+                        HardwareOutput.report('启动待响应阶段收到标准错误；当前启动流程将返回无可用进程。具体原因请查看 Vivado 原始输出，不能仅据此判定安装路径错误。', { level: ReportType.Warn });
                         resolve(undefined);
 
                         const vivadoInstallPath = vscode.workspace.getConfiguration('digital-ide').get<string>('prj.vivado.install.path') || '';
@@ -263,22 +287,31 @@ class XilinxOperation {
         });
 
         context.process = process;
+        HardwareOutput.report(process ? `启动流程已返回进程句柄；PID：${process.pid ?? '未知'}；工程是否初始化成功仍以 Vivado 输出为准。` : '启动流程未返回可用进程句柄。', { level: process ? ReportType.Info : ReportType.Warn });
     }
 
-    private handleMessage(message: string, status: 'pending' | 'fulfilled'): string {        
-        if (status === 'fulfilled') {
-            return message.trim();
-        } else {
-            const messageBuffer: string[] = [];
-            for (const line of message.trim().split('\n')) {
-                if (line.startsWith('source') && line.includes('.tcl')) {
-                    continue;
+    private handleMessage(message: string, _status: 'pending' | 'fulfilled'): string {
+        // 保留 Vivado 原始输出，不过滤 source 行，也不插入启动成功提示。
+        return message;
+    }
+
+    private sendCommand(context: PLContext, operation: string, command: string): void {
+        const process = context.process;
+        HardwareOutput.report(`【${operation}】准备发送请求\n工程：${this.diagnosticProjectPath || this.prjInfo.path}\n命令：${command}\n进程 PID：${process?.pid ?? '无'}；退出码：${process?.exitCode ?? '未退出或无进程'}；终止信号：${process?.signalCode ?? '无'}；已请求终止：${process?.killed ?? false}；输入流已销毁：${process?.stdin.destroyed ?? '无输入流'}；输入流可写：${process?.stdin.writable ?? false}`, { level: ReportType.Info });
+        if (!process) {
+            HardwareOutput.report(`【${operation}】未发送：没有 Vivado 进程句柄，请先启动。`, { level: ReportType.Warn });
+            return;
+        }
+        try {
+            const writable = process.stdin.write(command + '\n', error => {
+                if (error) {
+                    HardwareOutput.report(`【${operation}】标准输入写入失败；PID：${process.pid ?? '未知'}；工程：${this.diagnosticProjectPath || this.prjInfo.path}；错误：${error.message}`, { level: ReportType.Error });
                 }
-                messageBuffer.push(line);
-            }
-            const launchInfo = t('info.pl.launch.launch-info');
-            messageBuffer.unshift(launchInfo);
-            return messageBuffer.join("\n");
+            });
+            HardwareOutput.report(`【${operation}】已调用标准输入写入${writable ? '' : '（返回 false，可能存在背压或流不可用）'}；这不代表 Vivado 已接收或执行成功，请检查后续原始输出。`, { level: ReportType.Info });
+        } catch (error) {
+            HardwareOutput.report(`【${operation}】写入请求异常：${String(error)}`, { level: ReportType.Error });
+            throw error;
         }
     }
 
@@ -292,10 +325,10 @@ class XilinxOperation {
             const sourceBdPath = `${workspacePath}/prj/xilinx/${plName}.gen/sources_1/bd`;
     
             hdlDir.mvdir(sourceIpPath, targetPath, true);
-            HardwareOutput.report("move dir from " + sourceIpPath + " to " + targetPath);
+            HardwareOutput.report(`已调用 IP 目录迁移：${sourceIpPath} → ${targetPath}；未校验迁移结果。`);
     
             hdlDir.mvdir(sourceBdPath, targetPath, true);
-            HardwareOutput.report("move dir from " + sourceBdPath + " to " + targetPath);
+            HardwareOutput.report(`已调用 BD 目录迁移：${sourceBdPath} → ${targetPath}；未配置 BD 时源目录可能不存在，不代表工程错误。`);
         }
 
         if (hdlDir.isDir(`${workspacePath}/prj/xilinx/${plName}.srcs`)) {            
@@ -303,16 +336,18 @@ class XilinxOperation {
             const sourceBdPath = `${workspacePath}/prj/xilinx/${plName}.srcs/sources_1/bd`;
     
             hdlDir.mvdir(sourceIpPath, targetPath, true);
-            HardwareOutput.report("move dir from " + sourceIpPath + " to " + targetPath);
+            HardwareOutput.report(`已调用 IP 目录迁移：${sourceIpPath} → ${targetPath}；未校验迁移结果。`);
     
             hdlDir.mvdir(sourceBdPath, targetPath, true);
-            HardwareOutput.report("move dir from " + sourceBdPath + " to " + targetPath);
+            HardwareOutput.report(`已调用 BD 目录迁移：${sourceBdPath} → ${targetPath}；未配置 BD 时源目录可能不存在，不代表工程错误。`);
         }
 
         await this.closeAllWindows();
     }
 
     public create(scripts: string[]) {
+        this.diagnosticProjectPath = hdlPath.join(this.prjInfo.path, this.prjInfo.name + '.xpr');
+        HardwareOutput.report(`准备创建工程：${this.prjInfo.name}\n工程目录：${this.prjInfo.path}\n目标器件：${this.prjInfo.device}`, { level: ReportType.Info });
         scripts.push(`set_param general.maxThreads 8`);
         scripts.push(`create_project ${this.prjInfo.name} ${this.prjInfo.path} -part ${this.prjInfo.device} -force`);
         scripts.push(`set_property SOURCE_SET sources_1   [get_filesets sim_1]`);
@@ -321,6 +356,8 @@ class XilinxOperation {
     }
 
     public open(path: AbsPath, scripts: string[]) {
+        this.diagnosticProjectPath = path;
+        HardwareOutput.report(`准备打开工程：${path}`, { level: ReportType.Info });
         scripts.push(`set_param general.maxThreads 8`);
         scripts.push(`open_project ${quoteTcl(path)} -quiet`);
     }
@@ -331,6 +368,9 @@ class XilinxOperation {
      */
     private getRefreshXprDesignSourceCommand(): string {
         const scripts: string[] = [];
+        HardwareOutput.report('准备生成源文件同步脚本：将先移除 Vivado 当前文件列表，再按插件识别结果重新添加。', { level: ReportType.Info });
+        scripts.push('puts "DIDE_SYNC_BEGIN"');
+        HardwareOutput.report(`设计源目录：${this.srcPath}\n约束目录：${this.datPath}\n设计顶层：${this.topMod.src || '未识别'}\n仿真顶层：${this.topMod.sim || '未识别'}`, { level: ReportType.Info });
         // 清除所有源文件
         scripts.push(`remove_files -quiet [get_files]`);
 
@@ -347,9 +387,10 @@ class XilinxOperation {
         scripts.push(`set_property ip_repo_paths $xip_repo_paths [current_project] -quiet`);
         scripts.push(`update_ip_catalog -quiet`);
 
-        // 导入bd设计源文件
-        if (hdlFile.isHasAttr(this.prjConfig, "soc.bd")) {
-            const bd = this.prjConfig.soc.bd;
+        // BD is optional: an absent, empty or whitespace-only name means no import.
+        const bd = this.prjConfig.soc?.bd?.trim();
+        HardwareOutput.report(bd ? `配置的 Block Design：${bd}` : '未配置 Block Design，正常跳过 BD 导入。', { level: ReportType.Info });
+        if (bd) {
             const bdFile = bd + '.bd';
             let bdSrcPath = hdlPath.join(this.xbdPath, bdFile);
             if (!hdlFile.isFile(bdSrcPath)) {
@@ -357,22 +398,23 @@ class XilinxOperation {
             }
     
             if (!hdlFile.isFile(bdSrcPath)) {
-                vscode.window.showErrorMessage(`can not find ${bd}.bd in ${this.xbdPath} and ${this.custom.bdRepo}`);
+                HardwareOutput.report(`找不到已配置的 BD：${bdFile}；搜索目录：${this.xbdPath}、${this.custom.bdRepo}`, { level: ReportType.Error });
+                vscode.window.showErrorMessage(`找不到 ${bdFile}；搜索目录：${this.xbdPath}、${this.custom.bdRepo}`);
             } else {
                 if (hdlFile.copyFile(
                     bdSrcPath, 
                     hdlPath.join(this.HWPath, 'bd', bd, bdFile)
                 )) {
-                    vscode.window.showErrorMessage(`cp ${bd} failed, can not find ${bdSrcPath}`);
+                    HardwareOutput.report(`BD 文件复制接口返回成功：${bdSrcPath} → ${hdlPath.join(this.HWPath, 'bd', bd, bdFile)}；尚未执行 Vivado 导入。`, { level: ReportType.Info });
+                } else {
+                    HardwareOutput.report(`BD 文件复制接口返回失败：${bdSrcPath} → ${hdlPath.join(this.HWPath, 'bd', bd, bdFile)}`, { level: ReportType.Error });
                 }
             }
 
-            if (bd) {
-                const loadBdPath = hdlPath.join(this.HWPath, 'bd', bd, bdFile);
-                scripts.push(`generate_target all [get_files ${loadBdPath}] -quiet`);
-                scripts.push(`make_wrapper -files [get_files ${loadBdPath}] -top -quiet`);
-                scripts.push(`open_bd_design ${loadBdPath} -quiet`);
-            }
+            const loadBdPath = hdlPath.join(this.HWPath, 'bd', bd, bdFile);
+            scripts.push(`generate_target all [get_files ${loadBdPath}] -quiet`);
+            scripts.push(`make_wrapper -files [get_files ${loadBdPath}] -top -quiet`);
+            scripts.push(`open_bd_design ${loadBdPath} -quiet`);
         }
         
         const bdPaths = [
@@ -413,6 +455,8 @@ class XilinxOperation {
         });
 
         // 导入设计源文件
+        let sourceCount = 0;
+        let simulationCount = 0;
         for (const hdlFile of hdlParam.getAllHdlFiles()) {
             switch (hdlFile.projectType) {
                 case HdlFileProjectType.Src:
@@ -420,10 +464,14 @@ class XilinxOperation {
                 case HdlFileProjectType.RemoteLib:
                     // src 和 library 加入 source_1 设计源
                     scripts.push(`add_files [list ${quoteTcl(hdlFile.path)}]`);
+                    sourceCount++;
+                    HardwareOutput.report(`计划添加设计源：${hdlFile.path}`, { level: ReportType.Info });
                     break;
                 case HdlFileProjectType.Sim:
                     // sim 加入 sim_1 设计源
                     scripts.push(`add_files -fileset sim_1 [list ${quoteTcl(hdlFile.path)}]`);
+                    simulationCount++;
+                    HardwareOutput.report(`计划添加仿真源：${hdlFile.path}`, { level: ReportType.Info });
                     break;
                 case HdlFileProjectType.IP:
                 case HdlFileProjectType.Primitive:
@@ -435,6 +483,7 @@ class XilinxOperation {
         }
 
         scripts.push(`add_files -fileset constrs_1 [list ${quoteTcl(this.datPath)}]`);
+        HardwareOutput.report(`同步计划：设计源 ${sourceCount} 个，仿真源 ${simulationCount} 个；约束从目录导入。此计数是待执行计划，不代表已导入成功。`, { level: ReportType.Info });
 
         if (this.topMod.src !== '') {
             scripts.push(`set_property top ${this.topMod.src} [current_fileset]`);
@@ -443,11 +492,15 @@ class XilinxOperation {
             scripts.push(`set_property top ${this.topMod.sim} [get_filesets sim_1]`);
         }
 
+        scripts.push('puts "DIDE_SYNC_DONE files=[llength [get_files -quiet]]"');
+        HardwareOutput.report('执行标记说明：DIDE_SYNC_BEGIN=Vivado 开始同步；DIDE_SYNC_DONE=同步脚本执行到末尾，files 为实际文件数量。若没有结束标记，请检查原始 Tcl 错误。', { level: ReportType.Info });
         let script = scripts.join('\n') + '\n';
 
         const scriptPath = `${this.xilinxPath}/refresh.tcl`;
+        HardwareOutput.report(`源文件同步脚本：${scriptPath}`, { level: ReportType.Info });
         script += `file delete -force ${quoteTcl(scriptPath)}\n`;
-        hdlFile.writeFile(scriptPath, encodeTclScript(script));
+        const refreshScriptWritten = hdlFile.writeFile(scriptPath, encodeTclScript(script));
+        HardwareOutput.report(`同步脚本写入${refreshScriptWritten ? '完成' : '失败'}：${scriptPath}\n计划同步命令：\n${script}`, { level: refreshScriptWritten ? ReportType.Info : ReportType.Error });
         return encodeTclScript(loadTclScript(scriptPath)).trim();
     }
 
@@ -456,21 +509,29 @@ class XilinxOperation {
      * @param context 
      */
     public refresh(context: PLContext) {
+        if (!context.process || context.process.exitCode !== null || context.process.stdin.destroyed) {
+            HardwareOutput.report(`无法同步：没有可用的 Vivado 进程，请先执行 Launch。工程：${this.diagnosticProjectPath || this.prjInfo.path}；PID：${context.process?.pid ?? '无'}；退出码：${context.process?.exitCode ?? '未退出或无进程'}；输入流已销毁：${context.process?.stdin.destroyed ?? '无输入流'}`, { level: ReportType.Error });
+            return;
+        }
+        HardwareOutput.report('收到手动刷新请求，准备向 Vivado 发送同步命令。', { level: ReportType.Info });
         vscode.window.showInformationMessage(
-            "Xilinx: Refresh",
+            "Xilinx：请求刷新工程",
             { title: 'ok', value: true }
         );
         const cmd = this.getRefreshXprDesignSourceCommand();
-        context.process?.stdin.write(cmd + '\n');
+        this.sendCommand(context, '刷新工程源文件', cmd);
     }
 
     public async closeAllWindows() {
+        HardwareOutput.report(`开始执行 Vivado 关闭清理；记录的 Vivado PID：${this.guiPid}；工作区：${opeParam.workspacePath}`, { level: ReportType.Info });
         if (this.guiPid > 0) {
+            HardwareOutput.report(`请求终止 Vivado 进程：${this.guiPid}；结果以进程退出事件为准。`, { level: ReportType.Info });
             await killProcess(this.guiPid);
         }
 
         const srcscannerPids = await getPIDsWithName('srcscanner');
         for (const pid of srcscannerPids) {
+            HardwareOutput.report(`请求终止 srcscanner 进程：${pid}`, { level: ReportType.Info });
             await killProcess(pid);
         }
 
@@ -479,12 +540,13 @@ class XilinxOperation {
             if (file.startsWith('vivado_pid') && file.endsWith('.str')) {
                 const file_path = hdlPath.join(opeParam.workspacePath, file);
                 hdlFile.rmSync(file_path);
+                HardwareOutput.report(`已执行 Vivado 临时记录清理：${file_path}`, { level: ReportType.Info });
             }
         }
     }
 
     public async exit(context: PLContext) {
-        context.process?.stdin.write('exit' + '\n');
+        this.sendCommand(context, '退出 Vivado', 'exit');
         await this.closeAllWindows();
     }
 
@@ -494,7 +556,7 @@ class XilinxOperation {
 
     public simulateGui(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Simulate GUI",
+            "Xilinx：请求 GUI 仿真",
             { title: 'ok', value: true }
         );
 
@@ -513,7 +575,7 @@ if { [string length $curr_wave] == 0 } {
         add_wave /
         set_property needs_save false [current_wave_config]
     } else {
-        send_msg_id Add_Wave-1 WARNING "No top level signals found. Simulator will start without a wave window. If you want to open a wave window go to 'File->New Waveform Configuration' or type 'create_wave_config' in the TCL console."
+        send_msg_id Add_Wave-1 WARNING "未找到顶层信号，仿真器将不打开波形窗口。可通过 File->New Waveform Configuration 或 Tcl 命令 create_wave_config 创建波形配置。"
     }
 }
 run 1us
@@ -521,16 +583,17 @@ run 1us
 start_gui -quiet
 file delete ${scriptPath} -force\n`;
 
-        hdlFile.writeFile(scriptPath, script);
+        const scriptWritten = hdlFile.writeFile(scriptPath, script);
+        HardwareOutput.report(`GUI 仿真脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = `source ${scriptPath} -quiet`;
         
-        HardwareOutput.report('simulateGui');
-        context.process?.stdin.write(cmd + '\n');
+        HardwareOutput.report(`GUI 仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 1us。`, { level: ReportType.Info });
+        this.sendCommand(context, 'GUI 仿真', cmd);
     }
 
     public simulateCli(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Simulate CLI",
+            "Xilinx：请求命令行仿真",
             { title: 'ok', value: true }
         );
 
@@ -548,22 +611,23 @@ if { [string length $curr_wave] == 0 } {
         add_wave /
         set_property needs_save false [current_wave_config]
     } else {
-        send_msg_id Add_Wave-1 WARNING "No top level signals found. Simulator will start without a wave window. If you want to open a wave window go to 'File->New Waveform Configuration' or type 'create_wave_config' in the TCL console."
+        send_msg_id Add_Wave-1 WARNING "未找到顶层信号，仿真器将不打开波形窗口。可通过 File->New Waveform Configuration 或 Tcl 命令 create_wave_config 创建波形配置。"
     }
 }
 run 1us
 file delete ${scriptPath} -force\n`;
 
-        hdlFile.writeFile(scriptPath, script);
+        const scriptWritten = hdlFile.writeFile(scriptPath, script);
+        HardwareOutput.report(`命令行仿真脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = `source ${scriptPath} -quiet`;
 
-        HardwareOutput.report('simulateCli');
-        context.process?.stdin.write(cmd + '\n');
+        HardwareOutput.report(`命令行仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 1us。`, { level: ReportType.Info });
+        this.sendCommand(context, '命令行仿真', cmd);
     }
 
     public synth(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Synth",
+            "Xilinx：请求综合",
             { title: 'ok', value: true }
         );
 
@@ -577,12 +641,12 @@ file delete ${scriptPath} -force\n`;
         script += `launch_runs synth_1 ${quietArg} -jobs 4;`;
         script += `wait_on_run synth_1 ${quietArg}`;
 
-        context.process?.stdin.write(script + '\n');
+        this.sendCommand(context, '综合 synth_1', script);
     }
 
     impl(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Impl",
+            "Xilinx：请求实现",
             { title: 'ok', value: true }
         );
 
@@ -598,12 +662,12 @@ file delete ${scriptPath} -force\n`;
         script += `open_run impl_1 ${quietArg};`;
         script += `report_timing_summary ${quietArg}`;
 
-        context.process?.stdin.write(script + '\n');
+        this.sendCommand(context, '实现 impl_1', script);
     }
 
     build(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Build",
+            "Xilinx：请求构建",
             { title: 'ok', value: true }
         );
         let quietArg = '';
@@ -627,15 +691,17 @@ file delete ${scriptPath} -force\n`;
         script += `source ${scriptPath} -notrace\n`;
 
         script += `file delete ${scriptPath} -force\n`;
-        hdlFile.writeFile(scriptPath, script);
+        const scriptWritten = hdlFile.writeFile(scriptPath, script);
+        HardwareOutput.report(`构建脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = `source ${scriptPath} -quiet`;
 
-        context.process?.stdin.write(cmd + '\n');
+        HardwareOutput.report(`构建脚本：${scriptPath}\n计划命令：\n${script}\n沿用现有调用顺序：生成 bit 请求先于构建脚本发送；本日志不确认构建结果。`, { level: ReportType.Info });
+        this.sendCommand(context, '构建', cmd);
     }
 
     generateBit(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: BitStream",
+            "Xilinx：请求生成 bit",
             { title: 'ok', value: true }
         );
 
@@ -663,15 +729,17 @@ file delete ${scriptPath} -force\n`;
         }
         let scriptPath = `${this.xilinxPath}/bit.tcl`;
         script += `file delete ${scriptPath} -force\n`;
-        hdlFile.writeFile(scriptPath, script);
+        const scriptWritten = hdlFile.writeFile(scriptPath, script);
+        HardwareOutput.report(`bit 脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = `source ${scriptPath} -quiet`;
 
-        context.process?.stdin.write(cmd + '\n');
+        HardwareOutput.report(`生成 bit 脚本：${scriptPath}；SoC 核：${core || '未配置'}\n计划命令：\n${script}\nbit 输出路径相对于 Vivado 当前工作目录，不保证等同于工程目录。`, { level: ReportType.Info });
+        this.sendCommand(context, '生成 bit', cmd);
     }
 
     program(context: PLContext) {
         vscode.window.showInformationMessage(
-            "Xilinx: Program",
+            "Xilinx：请求下载到硬件",
             { title: 'ok', value: true }
         );
 
@@ -685,7 +753,7 @@ foreach hw_target [get_hw_targets] {
     open_hw_target -quiet
     foreach hw_device [get_hw_devices] {
         if { [string equal -length 6 [get_property PART $hw_device] ${this.prjInfo.device}] == 1 } {
-            puts "------Successfully Found Hardware Target with a ${this.prjInfo.device} device------ "
+            puts "------已找到匹配 ${this.prjInfo.device} 的硬件目标，尚未执行下载------ "
             current_hw_device $hw_device
             set found 1
         }
@@ -696,7 +764,7 @@ foreach hw_target [get_hw_targets] {
 
 #download the hw_targets
 if {$found == 0 } {
-    puts "******ERROR : Did not find any Hardware Target with a ${this.prjInfo.device} device****** "
+    puts "******错误：未找到匹配 ${this.prjInfo.device} 的硬件目标，未执行下载****** "
 } else {
     set_property PROGRAM.FILE ./[current_project].bit [current_hw_device]
     program_hw_devices [current_hw_device] -quiet
@@ -704,28 +772,33 @@ if {$found == 0 } {
 }
 file delete ${scriptPath} -force\n`;
 
-        hdlFile.writeFile(scriptPath, script);
+        const scriptWritten = hdlFile.writeFile(scriptPath, script);
+        HardwareOutput.report(`下载脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = `source ${scriptPath} -quiet`;
 
-        context.process?.stdin.write(cmd + '\n');
+        HardwareOutput.report(`下载脚本：${scriptPath}；目标器件：${this.prjInfo.device}；待下载文件：./[current_project].bit（相对于 Vivado 当前工作目录）。找到器件不代表下载成功。`, { level: ReportType.Info });
+        this.sendCommand(context, '下载到硬件', cmd);
     }
 
     public async gui(context: PLContext) {
+        HardwareOutput.report(`收到打开 Vivado GUI 请求；GUI 请求标志：${this.guiLaunched}；Vivado PID：${this.guiPid}；工程：${this.diagnosticProjectPath || this.prjInfo.path}`, { level: ReportType.Info });
         if (context.process === undefined) {
+            HardwareOutput.report('GUI 请求没有进程句柄，先执行启动流程。', { level: ReportType.Info });
             await this.launch(context);
         }
 
         const tclProcess = context.process;
         if (tclProcess === undefined) {
+            HardwareOutput.report('GUI 请求未发送：启动流程未返回可用进程。', { level: ReportType.Warn });
             return;
         }
 
-        tclProcess.stdin.write('start_gui -quiet\n');
+        this.sendCommand(context, '打开 GUI', 'start_gui -quiet');
         vscode.window.showInformationMessage(
-            t('info.vivado-gui.started'),
+            '已提交 Vivado GUI 打开请求，尚未确认窗口已打开。',
             { title: t('ok'), value: true }
         );
-        HardwareOutput.report(t('info.pl.gui.report-title'), {
+        HardwareOutput.report('GUI 打开请求流程已返回；guiLaunched 仅记录请求标志，不表示已检测到窗口。', {
             level: ReportType.Info
         });
 
@@ -736,16 +809,20 @@ file delete ${scriptPath} -force\n`;
     public addFiles(files: string[], context: PLContext) {
         if (!this.guiLaunched && files.length > 0) {
             const filesString = files.join("\n");
-            HardwareOutput.report(t('info.pl.add-files.title') + '\n' + filesString);
+            HardwareOutput.report('准备添加工程文件：\n' + filesString);
             this.execCommandToFilesInTclInterpreter(files, context, "add_file");
+        } else {
+            HardwareOutput.report(`跳过自动添加文件：GUI 请求标志=${this.guiLaunched}；文件数=${files.length}。`, { level: ReportType.Info });
         }
     }
 
     public delFiles(files: string[], context: PLContext) {
         if (!this.guiLaunched && files.length > 0) {
             const filesString = files.join("\n");
-            HardwareOutput.report(t('info.pl.del-files.title') + '\n' + filesString);
+            HardwareOutput.report('准备移除工程文件：\n' + filesString);
             this.execCommandToFilesInTclInterpreter(files, context, "remove_files");
+        } else {
+            HardwareOutput.report(`跳过自动移除文件：GUI 请求标志=${this.guiLaunched}；文件数=${files.length}。`, { level: ReportType.Info });
         }
     }
 
@@ -756,7 +833,7 @@ file delete ${scriptPath} -force\n`;
      */
     public setSrcTop(name: string, context: PLContext) {
         const cmd = `set_property top ${name} [current_fileset]`;
-        context.process?.stdin.write(cmd + '\n');
+        this.sendCommand(context, '设置设计顶层', cmd);
     }
 
     /**
@@ -766,7 +843,7 @@ file delete ${scriptPath} -force\n`;
      */
     public setSimTop(name: string, context: PLContext) {
         const cmd = `set_property top ${name} [get_filesets sim_1]`;
-        context.process?.stdin.write(cmd + '\n');
+        this.sendCommand(context, '设置仿真顶层', cmd);
     }
 
     /**
@@ -777,10 +854,11 @@ file delete ${scriptPath} -force\n`;
      */
     public execCommandToFilesInTclInterpreter(files: string[], context: PLContext, command: string) {
         if (context.process === undefined) {
+            HardwareOutput.report(`文件更新未发送：没有 Vivado 进程；命令：${command}；文件数：${files.length}；工程：${this.diagnosticProjectPath || this.prjInfo.path}`, { level: ReportType.Warn });
             return;
         }
         for (const file of files) {
-            context.process.stdin.write(command + ' ' + file + '\n');
+            this.sendCommand(context, '更新工程文件列表', command + ' ' + file);
         }
     }
 
@@ -826,9 +904,11 @@ file delete ${scriptPath} -force\n`;
             if (opeParam.os === 'win32') {
                 vivadoPath += '.bat';
             }
+            HardwareOutput.report(`使用配置的 Vivado 可执行路径：${vivadoPath}`, { level: ReportType.Info });
             return vivadoPath;
         } else {
             // 没有设置 vivado bin 文件夹，就认为用户已经把对应的路径加入环境变量了
+            HardwareOutput.report(`Vivado 安装目录${vivadoBinFolder ? '配置不是有效目录' : '未配置'}，沿用系统命令解析执行 vivado；不输出环境变量。`, { level: ReportType.Info });
             return 'vivado';
         }
     }
@@ -1002,17 +1082,27 @@ const tools = {
         output_context += "}";
         let result = hdlFile.writeFile(bootInfo.outputPath, output_context);
         if (!result) {
+            HardwareOutput.report(`启动镜像配置写入失败：${bootInfo.outputPath}`, { level: ReportType.Error });
             return null;
         }
 
         let command = `bootgen -arch zynq -image ${bootInfo.outputPath} -o ${opeParam.workspacePath}/BOOT.bin -w on`;
+        HardwareOutput.report(`准备生成启动镜像；工作区：${opeParam.workspacePath}\n执行命令：${command}；尚未确认生成成功。`, { level: ReportType.Info });
         exec(command, function (error, stdout, stderr) {
+            if (stdout) {
+                HardwareOutput.report(stdout, { level: ReportType.Info });
+            }
+            if (stderr) {
+                HardwareOutput.report(stderr, { level: ReportType.Error });
+            }
             if (error) {
+                HardwareOutput.report(`启动镜像生成进程失败：${error.message}\n命令：${command}`, { level: ReportType.Error });
                 vscode.window.showErrorMessage(`${error}`);
-                vscode.window.showErrorMessage(`stderr: ${stderr}`);
+                vscode.window.showErrorMessage(`标准错误：${stderr}`);
                 return;
             } else {
-                vscode.window.showInformationMessage("write boot file successfully!!");
+                HardwareOutput.report(`bootgen 进程已正常退出；预期输出：${opeParam.workspacePath}/BOOT.bin；未校验文件内容。`, { level: ReportType.Info });
+                vscode.window.showInformationMessage("启动镜像生成命令已正常退出，文件内容尚未校验。");
             }
         });
     },
@@ -1041,7 +1131,8 @@ const tools = {
             filePath => filePath.endsWith('.bit'));
 
         if (bitList.length === 0) {
-            vscode.window.showInformationMessage("Generated only from elf file");
+            HardwareOutput.report(`未发现 bit 文件：${bitPath}；按原流程仅使用 ELF 生成启动镜像。`, { level: ReportType.Info });
+            vscode.window.showInformationMessage("仅使用 ELF 文件生成启动镜像");
         } 
         else if (bitList.length === 1) {
             return"\t" + bitPath + bitList[0] + "\n";
@@ -1087,7 +1178,8 @@ const tools = {
         }
 
         // 如果内层也没有则直接退出
-        vscode.window.showErrorMessage("The elf file was not found\n");
+        HardwareOutput.report(`未找到 ELF 文件；搜索目录：${bootInfo.outsidePath}、${bootInfo.insidePath}`, { level: ReportType.Error });
+        vscode.window.showErrorMessage("未找到 ELF 文件");
         return '';
     },
     
