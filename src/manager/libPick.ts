@@ -8,6 +8,7 @@ import { HdlLangID } from '../global/enum';
 import { hdlFile, hdlPath } from '../hdlFs';
 import { getIconConfig } from '../hdlFs/icons';
 import { getLanguageId } from '../hdlFs/file';
+import { t } from '../i18n';
 
 type MissPathType = { path?: string };
 type LibPickItem = vscode.QuickPickItem & MissPathType;
@@ -34,7 +35,7 @@ class LibPick {
             description: 'common library provided by us',
             detail: 'current path: ' + this.commonPath,
             path: this.commonPath,
-            buttons: [{iconPath: getIconConfig('import'), tooltip: 'import everything in common'}]
+            buttons: [{iconPath: getIconConfig('import'), tooltip: t('import everything in common')}]
         };
 
         this.customQuickPickItem = {
@@ -42,7 +43,7 @@ class LibPick {
             description: 'custom library by yourself',
             detail: 'current path: ' + this.customPath,
             path: this.customPath,
-            buttons: [{iconPath: getIconConfig('import'), tooltip: 'import everything in custom'}]
+            buttons: [{iconPath: getIconConfig('import'), tooltip: t('import everything in custom')}]
         };
 
         this.rootItems = [
@@ -108,7 +109,7 @@ class LibPick {
 
                 const themeIcon = this.getPathIcon(filePath);
                 const label = themeIcon + " " + fileName;
-                const buttons = [{iconPath: getIconConfig('import'), tooltip: 'import everything in ' + fileName}];
+                const buttons = [{iconPath: getIconConfig('import'), tooltip: t('import everything in ') + fileName}];
                 items.push({label, description: '', path: filePath, buttons});
             } else if (hdlFile.isDir(filePath)) {
                 if (['.git', '.github', '.vscode'].includes(fileName)) {
@@ -119,7 +120,7 @@ class LibPick {
                 // 寻找 fileName 下的 readme，fileName 在这里是一个 文件夹
                 const mdText = this.getReadmeText(path, fileName);
                 const description = mdText ? mdText : '';
-                const buttons = [{iconPath: getIconConfig('import'), tooltip: 'import everything in ' + fileName}];
+                const buttons = [{iconPath: getIconConfig('import'), tooltip: t('import everything in ') + fileName}];
                 items.push({label, description, path: filePath, buttons});
             }
 

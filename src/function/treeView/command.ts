@@ -73,11 +73,11 @@ class BaseCommandTreeProvider implements vscode.TreeDataProvider<CommandDataItem
         );
         treeItem.contextValue = this.contextValue;
         treeItem.command = {
-            title: element.cmd,
+            title: t(element.tip),
             command: element.cmd,
         };
 
-        treeItem.tooltip = element.tip;
+        treeItem.tooltip = t(element.tip);
 
         treeItem.iconPath = getIconConfig(element.icon);
 

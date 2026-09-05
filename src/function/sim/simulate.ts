@@ -14,6 +14,7 @@ import { defaultMacro, doFastApi } from '../../hdlParser/util';
 import { t } from '../../i18n';
 import { openWaveViewer } from '../dide-viewer';
 import { HdlDependence } from '../../hdlParser/common';
+import { collectWaveOutput } from './waveOutput';
 
 type Path = string;
 
@@ -447,7 +448,14 @@ export class IcarusSimulate extends Simulate {
                 const match = line.match(/dumpfile (.+) opened for output/);
                 if (match) {
                     const vcdPath = match[1];
-                    const absVcdPath = hdlPath.resolve(cwd, vcdPath);
+                    let absVcdPath = hdlPath.resolve(cwd, vcdPath);
+                    if (this.simConfig) {
+                        try {
+                            absVcdPath = collectWaveOutput(cwd, vcdPath, this.simConfig.simulationHome);
+                        } catch (error) {
+                            MainOutput.report(`波形归档失败，保留原路径打开：${String(error)}`, { level: ReportType.Warn });
+                        }
+                    }
                     MainOutput.report(t('info.simulate.vvp.vcd-generate', absVcdPath), { level: ReportType.Finish });
                     if (fs.existsSync(absVcdPath)) {
                         openWaveViewer(this.context, vscode.Uri.file(absVcdPath));

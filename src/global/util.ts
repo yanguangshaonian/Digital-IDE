@@ -6,6 +6,7 @@ import * as childProcess from 'child_process';
 import { AbsPath, MainOutput, ReportType } from ".";
 import { t } from '../i18n';
 import { hdlPath } from '../hdlFs';
+import { terminateProcess } from './processTermination';
 
 export class PathSet {
     files: Set<AbsPath> = new Set<AbsPath>();
@@ -221,39 +222,12 @@ export function getPIDsWithName(name: string): Promise<number[]> {
     });
 }
 
-export function killProcess(pid: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-        let command: string;
-
-        const currentPlatform = os.platform();
-
-        if (currentPlatform === 'win32') {
-            // Windows 使用 taskkill 命令
-            command = `taskkill /PID ${pid} /F`;
-        } else {
-            // macOS 和 Linux 使用 kill 命令
-            command = `kill -9 ${pid}`;
-        }
-
-        // 执行命令
-        childProcess.exec(command, (error, stdout, stderr) => {
-            if (error) {
-                reject(`Error: ${error.message}`);
-                return;
-            }
-
-            if (stderr) {
-                reject(`Stderr: ${stderr}`);
-                return;
-            }
-            const message = t('info.process-killed', pid.toString());
-            
-            MainOutput.report(message);
-            console.log(message);
-            
-            resolve();
-        });
-    });
+export async function killProcess(pid: number): Promise<void> {
+    if (await terminateProcess(pid)) {
+        const message = t('info.process-killed', pid.toString());
+        MainOutput.report(message);
+        console.log(message);
+    }
 }
 
 /**

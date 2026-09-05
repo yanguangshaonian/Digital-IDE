@@ -145,7 +145,7 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
 
         // set command
         treeItem.command = {
-            title: "Open this HDL File",
+            title: t('Open this HDL File'),
             command: 'digital-ide.treeView.arch.openFile',
             arguments: [element.path, element.range, element],
         };

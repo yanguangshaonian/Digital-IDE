@@ -652,7 +652,7 @@
                     "dark": "images/svg/dark/netlist.svg"
                 },
                 "category": "Digital-IDE",
-                "title": "test"
+                "title": "%digital-ide.netlist.title%"
             },
             {
                 "command": "digital-ide.waveviewer.show",

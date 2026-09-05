@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { ChildProcessWithoutNullStreams, exec, spawn } from 'child_process';
 import * as fspath from 'path';
 import * as fs from 'fs';
-import * as iconv from 'iconv-lite';
+import { createOutputDecoder, getProcessOutputEncoding } from '../../global/processTermination';
 
 import { AbsPath, opeParam, PrjInfo } from '../../global';
 import { hdlParam } from '../../hdlParser/core';
@@ -60,8 +60,11 @@ interface BootInfo {
  * xilinx operation under PL
  */
 class XilinxOperation {
+    private exitPromise?: Promise<void>;
     guiLaunched: boolean;
     guiPid: number;
+    private launchPromise?: Promise<string | undefined>;
+    private vivadoState: '空闲' | '启动中' | '等待工具输出' | '工程同步中' | '就绪' | '失败' | '已退出' = '空闲';
     private diagnosticProjectPath = '';
     constructor() {
         this.guiLaunched = false;
@@ -145,6 +148,31 @@ class XilinxOperation {
      * @param context
      */
     public async launch(context: PLContext): Promise<string | undefined> {
+        if (this.exitPromise) {
+            HardwareOutput.report('Vivado 正在退出，请等待退出完成后再启动。', { level: ReportType.Warn });
+            return undefined;
+        }
+        const existing = context.process;
+        if (existing && !existing.killed && existing.exitCode === null && !existing.stdin.destroyed) {
+            this.vivadoState = '就绪';
+            HardwareOutput.report(`Vivado 已有活跃会话，跳过重复启动；PID：${existing.pid ?? '未知'}；状态：${this.vivadoState}`, { level: ReportType.Warn });
+            context.process = existing;
+            return undefined;
+        }
+        if (this.launchPromise) {
+            HardwareOutput.report(`Vivado 正在启动，复用已有启动请求；当前状态：${this.vivadoState}`, { level: ReportType.Warn });
+            return this.launchPromise;
+        }
+        this.launchPromise = this.launchInternal(context);
+        try {
+            return await this.launchPromise;
+        } finally {
+            this.launchPromise = undefined;
+        }
+    }
+
+    private async launchInternal(context: PLContext): Promise<string | undefined> {
+        this.vivadoState = '启动中';
         HardwareOutput.report(`收到 Vivado 启动请求；工程搜索目录：${this.prjPath}；原进程 PID：${context.process?.pid ?? '无'}；原进程退出码：${context.process?.exitCode ?? '未退出或无进程'}`, { level: ReportType.Info });
         this.guiLaunched = false;
         this.guiPid = -1;
@@ -197,45 +225,68 @@ class XilinxOperation {
         
         const _this = this;
         
-        const onVivadoClose = debounce(() => {
-            _this.onVivadoClose();
-        }, 100);
+        const outputEncoding = await getProcessOutputEncoding();
+        HardwareOutput.report(`工具输出解码：${outputEncoding}（标准输出和错误流独立流式解码）`);
 
         function launchScript(pids: number[]): Promise<ChildProcessWithoutNullStreams | undefined> {
             if (!opeParam.workspacePath) {
+                _this.vivadoState = '失败';
                 HardwareOutput.report('启动中止：工作区路径为空，未创建 Vivado 进程。', { level: ReportType.Error });
                 return Promise.resolve(undefined);
             }
 
             const vivadoPids = new Set<number>(pids);
             const vivadoProcess = spawn(cmd, [], { shell: true, stdio: 'pipe', cwd: opeParam.workspacePath });
+            const stdoutDecoder = createOutputDecoder(outputEncoding);
+            const stderrDecoder = createOutputDecoder(outputEncoding);
+            vivadoProcess.stdout.once('end', () => {
+                const tail = stdoutDecoder.end();
+                if (tail) { HardwareOutput.report(tail); }
+            });
+            vivadoProcess.stderr.once('end', () => {
+                const tail = stderrDecoder.end();
+                if (tail) { HardwareOutput.report(tail, { level: ReportType.Error }); }
+            });
+            context.process = vivadoProcess;
+            _this.vivadoState = '等待工具输出';
             HardwareOutput.report(`已请求创建 Vivado 启动进程；Shell PID：${vivadoProcess.pid ?? '尚未分配'}；工作目录：${opeParam.workspacePath}；工程：${_this.diagnosticProjectPath}。尚未确认工程加载成功。`, { level: ReportType.Info });
             let status: 'pending' | 'fulfilled' = 'pending';
 
             vivadoProcess.on('close', () => {
                 HardwareOutput.report(`Vivado 启动进程通道已关闭；PID：${vivadoProcess.pid ?? '未知'}`, { level: ReportType.Info });
-                onVivadoClose();            
+                if (context.process === vivadoProcess) {
+                    context.process = undefined;
+                    _this.guiPid = -1;
+                    _this.guiLaunched = false;
+                    _this.vivadoState = '已退出';
+                    void _this.onVivadoClose().catch(error => HardwareOutput.report(`退出清理失败：${String(error)}`, { level: ReportType.Error }));
+                }
             });
             vivadoProcess.on('exit', (code, signal) => {
+                if (code !== 0) {
+                    _this.vivadoState = '失败';
+                } else if (_this.vivadoState !== '就绪') {
+                    _this.vivadoState = '已退出';
+                }
                 HardwareOutput.report(`Vivado 启动进程已退出：退出码=${code}，信号=${signal ?? '无'}`, {
                     level: code === 0 ? ReportType.Info : ReportType.Error
                 });
-                onVivadoClose();
             });
             vivadoProcess.on('disconnect', () => {
                 HardwareOutput.report(`Vivado 启动进程连接已断开；PID：${vivadoProcess.pid ?? '未知'}`, { level: ReportType.Warn });
-                onVivadoClose();
             });
 
             return new Promise(resolve => {
                 vivadoProcess.once('error', error => {
+                    _this.vivadoState = '失败';
                     HardwareOutput.report(`无法启动 Vivado 进程：${error.message}\n执行命令：${cmd}`, { level: ReportType.Error });
                     resolve(undefined);
                 });
                 vivadoProcess.once('close', () => resolve(undefined));
                 vivadoProcess.stdout.on('data', async data => {
-                    const message: string = _this.handleMessage(_this.decodeVivadoOutput(data), status);
+                    const message: string = _this.handleMessage(stdoutDecoder.write(data), status);
                     if (status === 'pending') {
+                        _this.vivadoState = '工程同步中';
                         HardwareOutput.show();
                         const pids = await getPIDsWithName('vivado');
                         const newPid = pids.find(p => !vivadoPids.has(p));
@@ -252,7 +303,8 @@ class XilinxOperation {
                 });
 
                 vivadoProcess.stderr.on('data', async data => {
-                    HardwareOutput.report(_this.decodeVivadoOutput(data), {
+                    const message = stderrDecoder.write(data);
+                    HardwareOutput.report(message, {
                         level: ReportType.Error
                     });
                     HardwareOutput.show();
@@ -264,7 +316,7 @@ class XilinxOperation {
                         const vivadoInstallPath = vscode.workspace.getConfiguration('digital-ide').get<string>('prj.vivado.install.path') || '';
                         
                         const res = await vscode.window.showErrorMessage(
-                            t('error.pl.launch.not-valid-vivado-path', _this.decodeVivadoOutput(data), vivadoInstallPath.toString()),
+                            t('error.pl.launch.not-valid-vivado-path', message, vivadoInstallPath.toString()),
                             {
                                 title: t('info.pl.launch.set-vivado-path'),
                                 value: true
@@ -287,7 +339,8 @@ class XilinxOperation {
             return await launchScript(originVivadoPids);
         });
 
-        context.process = process;
+        if (process && process.exitCode === null && !process.stdin.destroyed) { context.process = process; }
+        this.vivadoState = process ? '工程同步中' : '失败';
         HardwareOutput.report(process ? `启动流程已返回进程句柄；PID：${process.pid ?? '未知'}；工程是否初始化成功仍以 Vivado 输出为准。` : '启动流程未返回可用进程句柄。', { level: process ? ReportType.Info : ReportType.Warn });
     }
 
@@ -296,19 +349,13 @@ class XilinxOperation {
         return message;
     }
 
-    private decodeVivadoOutput(data: Buffer): string {
-        // Vivado 2018.3 on a Chinese Windows system writes the console using CP936.
-        // Decode in the extension so Vivado itself and its Tcl scripts remain unchanged.
-        const utf8 = data.toString('utf8');
-        const replacementCount = (utf8.match(/�/g) || []).length;
-        const decoded = iconv.decode(data, 'cp936');
-        return replacementCount > 0 || decoded.includes('阳光少年') ? decoded : utf8;
-    }
 
     private sendCommand(context: PLContext, operation: string, command: string): void {
         const process = context.process;
         HardwareOutput.report(`【${operation}】准备发送请求\n工程：${this.diagnosticProjectPath || this.prjInfo.path}\n命令：${command}\n进程 PID：${process?.pid ?? '无'}；退出码：${process?.exitCode ?? '未退出或无进程'}；终止信号：${process?.signalCode ?? '无'}；已请求终止：${process?.killed ?? false}；输入流已销毁：${process?.stdin.destroyed ?? '无输入流'}；输入流可写：${process?.stdin.writable ?? false}`, { level: ReportType.Info });
-        if (!process) {
+        if (!process || process.exitCode !== null || process.signalCode !== null || process.stdin.destroyed || !process.stdin.writable) {
+            if (context.process === process) { context.process = undefined; }
+            this.vivadoState = '已退出';
             HardwareOutput.report(`【${operation}】未发送：没有 Vivado 进程句柄，请先启动。`, { level: ReportType.Warn });
             return;
         }
@@ -352,7 +399,7 @@ class XilinxOperation {
             HardwareOutput.report(`已调用 BD 目录迁移：${sourceBdPath} → ${targetPath}；未配置 BD 时源目录可能不存在，不代表工程错误。`);
         }
 
-        await this.closeAllWindows();
+        // Normal process termination must not kill the exited PID or unrelated tools.
     }
 
     public create(scripts: string[]) {
@@ -556,8 +603,30 @@ class XilinxOperation {
     }
 
     public async exit(context: PLContext) {
-        this.sendCommand(context, '退出 Vivado', 'exit');
-        await this.closeAllWindows();
+        if (this.exitPromise) { return this.exitPromise; }
+        const process = context.process;
+        if (!process || process.exitCode !== null || process.stdin.destroyed) {
+            context.process = undefined;
+            this.vivadoState = '已退出';
+            HardwareOutput.report('Vivado 已退出，无需重复关闭。');
+            return;
+        }
+        this.exitPromise = new Promise<void>(resolve => {
+            const done = () => {
+                clearTimeout(timer);
+                process.removeListener('close', done);
+                resolve();
+            };
+            const timer = setTimeout(() => {
+                HardwareOutput.report('等待 Vivado 退出超时，保留会话用于诊断；未强杀或扫描其他进程。', { level: ReportType.Warn });
+                done();
+            }, 15000);
+            process.once('close', done);
+        });
+        try {
+            this.sendCommand(context, '退出 Vivado', 'exit');
+            await this.exitPromise;
+        } finally { this.exitPromise = undefined; }
     }
 
     public simulate(context: PLContext) {
@@ -791,6 +860,7 @@ file delete ${scriptPath} -force\n`;
     }
 
     public async gui(context: PLContext) {
+        HardwareOutput.report(`Vivado 会话状态：${this.vivadoState}；GUI 标志：${this.guiLaunched}；PID：${this.guiPid}`, { level: ReportType.Info });
         HardwareOutput.report(`收到打开 Vivado GUI 请求；GUI 请求标志：${this.guiLaunched}；Vivado PID：${this.guiPid}；工程：${this.diagnosticProjectPath || this.prjInfo.path}`, { level: ReportType.Info });
         if (context.process === undefined) {
             HardwareOutput.report('GUI 请求没有进程句柄，先执行启动流程。', { level: ReportType.Info });
@@ -804,6 +874,7 @@ file delete ${scriptPath} -force\n`;
         }
 
         this.sendCommand(context, '打开 GUI', 'start_gui -quiet');
+        this.vivadoState = '就绪';
         vscode.window.showInformationMessage(
             '已提交 Vivado GUI 打开请求，尚未确认窗口已打开。',
             { title: t('ok'), value: true }
