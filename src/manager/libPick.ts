@@ -31,17 +31,17 @@ class LibPick {
         }
         
         this.commonQuickPickItem = {
-            label: "$(libpick-common) common", 
-            description: 'common library provided by us',
-            detail: 'current path: ' + this.commonPath,
+            label: "$(libpick-common) " + t('libpick.common'),
+            description: t('libpick.common.description'),
+            detail: t('libpick.current-path') + this.commonPath,
             path: this.commonPath,
             buttons: [{iconPath: getIconConfig('import'), tooltip: t('import everything in common')}]
         };
 
         this.customQuickPickItem = {
-            label: "$(libpick-custom) custom", 
-            description: 'custom library by yourself',
-            detail: 'current path: ' + this.customPath,
+            label: "$(libpick-custom) " + t('libpick.custom'),
+            description: t('libpick.custom.description'),
+            detail: t('libpick.current-path') + this.customPath,
             path: this.customPath,
             buttons: [{iconPath: getIconConfig('import'), tooltip: t('import everything in custom')}]
         };
@@ -53,7 +53,7 @@ class LibPick {
 
         this.backQuickPickItem = {
             label: '...', 
-            description: 'return'
+            description: t('libpick.return')
         };
 
         this.curPath = '';
@@ -155,7 +155,7 @@ class LibPick {
     async pickItems() {
         const pickWidget = vscode.window.createQuickPick<LibPickItem>();
         
-        pickWidget.placeholder = 'pick the library';
+        pickWidget.placeholder = t('libpick.placeholder');
         pickWidget.items = this.provideQuickPickItem();
         
         pickWidget.onDidChangeSelection(items => {

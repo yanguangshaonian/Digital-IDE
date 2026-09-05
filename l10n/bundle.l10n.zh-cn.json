@@ -151,5 +151,14 @@
     "markdown-file": "Markdown 文件",
     "toolbar.save-as-html": "保存为 HTML",
     "html-file": "HTML 文件",
-    "dide-doc.error.loading-html": "Digital CodeDoc 资源加载失败，安装目录已经损坏，请重新安装！"
+    "dide-doc.error.loading-html": "Digital CodeDoc 资源加载失败，安装目录已经损坏，请重新安装！",
+    "treeview.src": "源文件",
+    "treeview.sim": "仿真文件",
+    "libpick.common": "公共库",
+    "libpick.custom": "自定义库",
+    "libpick.common.description": "由 Digital-IDE 提供的公共库",
+    "libpick.custom.description": "用户自定义的库",
+    "libpick.current-path": "当前路径：",
+    "libpick.return": "返回",
+    "libpick.placeholder": "选择库"
 }

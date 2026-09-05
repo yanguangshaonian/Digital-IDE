@@ -300,7 +300,7 @@ function parseJson5(text: string): any {
     try {
         json = JSON5.parse(text);
     } catch (error) {
-        MainOutput.report('error happen when parse json ', {
+        MainOutput.report('解析 JSON 时发生错误：', {
             level: ReportType.Error
         });
         MainOutput.report(error, {
@@ -321,7 +321,7 @@ function makeWaveDromSVG(wavedromComment: string, style: ThemeType): string {
         Count.svgMakeTimes += 1;
         return svgString;
     } catch (error) {
-        MainOutput.report('error happen when render ' + wavedromComment, {
+        MainOutput.report('渲染时发生错误：' + wavedromComment, {
             level: ReportType.Error
         });
         MainOutput.report(error, {

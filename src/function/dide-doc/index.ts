@@ -39,7 +39,7 @@ export const docManager = new Map<string, IDocManagerItem>();
 export function registerFileDocExport(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('digital-ide.hdlDoc.exportFile', async uri => {
         const option = {
-            placeHolder: 'Select an Export Format'
+            placeHolder: '选择导出格式'
         };
         const items = [
             new ExportFunctionItem('markdown', ' markdown', 'export markdown folder',  exportCurrentFileDocAsMarkdown),
@@ -62,7 +62,7 @@ export function registerFileDocExport(context: vscode.ExtensionContext) {
 export function registerProjectDocExport(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('digital-ide.hdlDoc.exportProject', async () => {
         const option = {
-            placeHolder: 'Select an Export Format'
+            placeHolder: '选择导出格式'
         };
         const items = [
             new ExportFunctionItem('markdown',' markdown', 'export markdown folder', exportProjectDocAsMarkdown),

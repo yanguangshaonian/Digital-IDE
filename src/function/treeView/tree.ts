@@ -126,6 +126,11 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
             }
         }
 
+        if (element.icon === 'src') {
+            itemName = t('treeview.src');
+        } else if (element.icon === 'sim') {
+            itemName = t('treeview.sim');
+        }
         const treeItem = new vscode.TreeItem(itemName, collapsibleState);
         // set contextValue file -> simulate / netlist
         if (otherModes.has(element.icon)) {
@@ -157,7 +162,7 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
         if (element) {
             const name = element.name;
             
-            if (name === 'sim' || name === 'src') {
+            if (element.icon === 'sim' || element.icon === 'src') {
                 element.parent = undefined;
                 return this.getTopModuleItemList(element);
             } else {

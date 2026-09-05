@@ -329,7 +329,7 @@ async function getDocsFromFile(path: AbsPath): Promise<MarkdownString[] | undefi
  */
 async function getRenderList(path: AbsPath): Promise<RenderString[] | undefined> {
     if (!hdlFile.isHDLFile(path)) {
-        vscode.window.showErrorMessage('Please use the command in a HDL file!');
+        vscode.window.showErrorMessage('请在 HDL 文件中使用此命令！');
         return [];
     }
     const docs = await getDocsFromFile(path);
@@ -398,7 +398,7 @@ async function exportCurrentFileDocAsMarkdown() {
 }
 
 async function exportProjectDocAsMarkdown() {
-    vscode.window.showInformationMessage('this is exportProjectDocAsMarkdown');
+    vscode.window.showInformationMessage('此功能用于导出项目 Markdown');
 }
 
 export {

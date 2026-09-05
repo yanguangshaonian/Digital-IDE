@@ -42,12 +42,12 @@ class XilinxOperation {
             p => p.endsWith('.hdf'));
 
         if (!hdfs.length) {
-            vscode.window.showErrorMessage(`There is no hdf file in ${this.config.dat}.`);
+            vscode.window.showErrorMessage(`未在 ${this.config.dat} 找到 HDF 硬件平台文件。请先从 Vivado 导出硬件平台。`);
             return null;
         }
 
         if (this.config.soc.core === "none") {
-            vscode.window.showErrorMessage(`Please set the correct core in the property.json.`);
+            vscode.window.showErrorMessage(`请在工程配置 property.json 中设置正确的处理器内核 core。`);
             return null;
         }
 

@@ -78,7 +78,7 @@ class Simulate {
         };
         let code = hdlFile.readFile(path);
         if (!code) {
-            MainOutput.report('error when read ' + path, {
+            MainOutput.report('读取文件时发生错误：' + path, {
                 level: ReportType.Error,
                 notify: true
             });
@@ -103,7 +103,7 @@ class Simulate {
         }
         
         if (!hdlFile.isDir(simConfig.simulationHome)) {
-            MainOutput.report('create dir ' + simConfig.simulationHome, {
+            MainOutput.report('创建目录：' + simConfig.simulationHome, {
                 level: ReportType.Info
             });
             hdlDir.mkdir(simConfig.simulationHome);
@@ -123,7 +123,7 @@ class Simulate {
 
         simConfig.installPath = setting.get('digital-ide.prj.iverilog.install.path', '');
         if (simConfig.installPath !== '' && !hdlFile.isDir(simConfig.installPath)) {
-            MainOutput.report(`install path ${simConfig.installPath} is illegal`, {
+            MainOutput.report(`安装路径 ${simConfig.installPath} 无效`, {
                 level: ReportType.Error,
                 notify: true
             });
@@ -491,7 +491,7 @@ export class IcarusSimulate extends Simulate {
     private exec(command: string, cwd: AbsPath, hdlModule: HdlModule) {
         const simConfig = this.simConfig;
         if (!simConfig) {
-            MainOutput.report('this.simConfig is empty when exec');
+            MainOutput.report('执行时仿真配置为空');
             return;
         }
 
@@ -529,7 +529,7 @@ export class IcarusSimulate extends Simulate {
             const cwd = hdlPath.resolve(path, '..');   
             this.exec(simulationCommand, cwd, hdlModule);
         } else {
-            const errorMsg = 'Fail to generate command';
+            const errorMsg = '无法生成命令';
             MainOutput.report(errorMsg, {
                 level: ReportType.Error,
                 notify: true
@@ -589,7 +589,7 @@ export class IcarusSimulate extends Simulate {
         if (targetModule !== undefined) {
             this.simulateByHdlModule(targetModule);
         } else {
-            MainOutput.report('There is no module named ' + view.name + ' in ' + view.path, {
+            MainOutput.report('在 ' + view.path + ' 中找不到名为 ' + view.name + ' 的模块', {
                 level: ReportType.Error,
                 notify: true
             });

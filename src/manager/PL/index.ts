@@ -41,7 +41,7 @@ class PlManage extends BaseManage {
         }
         this.reportSession('初始化');
         if (curToolChain !== ToolChainType.Xilinx && curToolChain !== ToolChainType.Efinity) {
-            HardwareOutput.report('【工具链选择】当前工具链没有专用硬件分支，保留原有 Xilinx 操作实现；请检查项目工具链配置。', {
+            HardwareOutput.report('[工具链选择] 当前工具链没有专用硬件分支, 保留原有 Xilinx 操作实现; 请检查项目工具链配置.', {
                 level: ReportType.Warn
             });
         }
@@ -53,12 +53,12 @@ class PlManage extends BaseManage {
         const implementation = ope instanceof EfinityOperation ? 'Efinity' :
             ope instanceof XilinxOperation ? 'Xilinx' : '其他';
         // 仅报告状态，不输出路径、命令参数、环境变量或错误原文。
-        HardwareOutput.report(`【硬件会话】操作=${action}；工具链=${toolName}；操作实现=${implementation}；工具路径=${path ? '已设置' : '未设置'}；进程句柄=${process ? '存在' : '不存在'}；退出码=${process?.exitCode ?? '未记录'}；已发送终止信号=${process?.killed ? '是' : '否'}；终端引用=${terminal ? '存在' : '不存在'}（引用存在不代表会话就绪）`);
+        HardwareOutput.report(`[硬件会话] 操作=${action}; 工具链=${toolName}; 操作实现=${implementation}; 工具路径=${path ? '已设置' : '未设置'}; 进程句柄=${process ? '存在' : '不存在'}; 退出码=${process?.exitCode ?? '未记录'}; 已发送终止信号=${process?.killed ? '是' : '否'}; 终端引用=${terminal ? '存在' : '不存在'}(引用存在不代表会话就绪)`);
     }
 
     private dispatch(action: string, ...args: unknown[]) {
         this.reportSession(action);
-        const reportFailure = (error: unknown) => HardwareOutput.report(`【硬件分发失败】操作=${action}；错误=${error instanceof Error ? error.stack || error.message : String(error)}；错误继续向上传播。`, {
+        const reportFailure = (error: unknown) => HardwareOutput.report(`[硬件分发失败] 操作=${action}; 错误=${error instanceof Error ? error.stack || error.message : String(error)}; 错误继续向上传播.`, {
             level: ReportType.Error
         });
         try {

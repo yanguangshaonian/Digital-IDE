@@ -112,7 +112,7 @@ async function transformOldPpy() {
         hdlFile.writeJSON(propertyJsonPath, oldPpyContent);
 
     } else {
-        vscode.window.showErrorMessage('You have\'t create property.json!');
+            vscode.window.showErrorMessage('尚未创建 property.json!');
     }
 }
 
@@ -173,10 +173,10 @@ function exportFilelist(view: ModuleDataItem) {
 
             askUserToSaveFilelist(filelist);
         } else {
-            vscode.window.showErrorMessage('fail to get deps of view ' + view.name);
+            vscode.window.showErrorMessage('无法获取视图的依赖项: ' + view.name);
         }
     } else {
-        vscode.window.showErrorMessage('cannot find path for current module');
+        vscode.window.showErrorMessage('找不到当前模块的路径');
     }
 
 }

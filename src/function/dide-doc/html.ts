@@ -260,7 +260,7 @@ export async function makeDocWebview(uri: vscode.Uri, context: vscode.ExtensionC
 
 async function exportCurrentFileDocAsHTML() {
     if (vscode.window.activeColorTheme.kind !== vscode.ColorThemeKind.Light) {
-        vscode.window.showErrorMessage('Please export html in a light theme!');
+        vscode.window.showErrorMessage('请在浅色主题下导出 HTML！');
         return;
     }
 
@@ -320,7 +320,7 @@ async function exportCurrentFileDocAsHTML() {
 }
 
 async function exportProjectDocAsHTML() {
-    vscode.window.showInformationMessage('this is exportProjectDocAsHTML');
+    vscode.window.showInformationMessage('此功能用于导出项目 HTML');
 }
 
 export {

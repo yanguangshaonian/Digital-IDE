@@ -43,7 +43,7 @@ function readPackageJson(context: vscode.ExtensionContext): any | undefined {
     const extensionPath = context.extensionPath;
     const packagePath = extensionPath + '/package.json';
     if (!fs.existsSync(packagePath)) {
-        vscode.window.showErrorMessage("Digital IDE 安装目录已经被污染，请重新安装！");
+        vscode.window.showErrorMessage("Digital IDE 安装目录已经被污染, 请重新安装!");
         return undefined;
     }
     const packageMeta = fs.readFileSync(packagePath, { encoding: 'utf-8' });

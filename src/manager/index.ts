@@ -8,8 +8,8 @@ import { HardwareOutput, ReportType } from '../global/outputChannel';
 // 不输出入口参数或环境变量；保留异常堆栈以便定位分发失败。
 function registerHardwareCommand(command: string, callback: (...args: any[]) => any) {
     vscode.commands.registerCommand(command, (...args: any[]) => {
-        HardwareOutput.report(`【VS Code 硬件命令入口】收到命令：${command}`);
-        const reportFailure = (error: unknown) => HardwareOutput.report(`【硬件命令失败】命令=${command}；错误=${error instanceof Error ? error.stack || error.message : String(error)}；错误继续向上传播。`, {
+        HardwareOutput.report(`[VS Code 硬件命令入口] 收到命令: ${command}`);
+        const reportFailure = (error: unknown) => HardwareOutput.report(`[硬件命令失败] 命令=${command}; 错误=${error instanceof Error ? error.stack || error.message : String(error)}; 错误继续向上传播.`, {
             level: ReportType.Error
         });
         try {
@@ -30,9 +30,9 @@ function registerHardwareCommand(command: string, callback: (...args: any[]) => 
 
 export function registerManagerCommands(context: vscode.ExtensionContext) {
     // make ps and ps have been prepared
-    HardwareOutput.report(`【硬件命令注册】硬件管理器=${prjManage.pl ? '已就绪' : '未就绪'}；软件管理器=${prjManage.ps ? '已就绪' : '未就绪'}`);
+    HardwareOutput.report(`[硬件命令注册] 硬件管理器=${prjManage.pl ? '已就绪' : '未就绪'}; 软件管理器=${prjManage.ps ? '已就绪' : '未就绪'}`);
     if (!prjManage.pl || !prjManage.ps) {
-        HardwareOutput.report('【硬件命令注册失败】管理器尚未初始化，无法继续注册命令。', { level: ReportType.Error });
+        HardwareOutput.report('[硬件命令注册失败] 管理器尚未初始化, 无法继续注册命令.', { level: ReportType.Error });
     }
     assert(prjManage.pl, '硬件管理器未初始化');
     assert(prjManage.ps, '软件管理器未初始化');
@@ -70,7 +70,7 @@ export function registerManagerCommands(context: vscode.ExtensionContext) {
     registerHardwareCommand('digital-ide.hard.program', () => plManage.program());
     registerHardwareCommand('digital-ide.hard.gui', () => plManage.gui());
     registerHardwareCommand('digital-ide.hard.exit', () => plManage.exit());
-    HardwareOutput.report('【硬件命令注册】已完成硬件功能及工具箱命令注册。');
+    HardwareOutput.report('[硬件命令注册] 已完成硬件功能及工具箱命令注册.');
 }
 
 export {

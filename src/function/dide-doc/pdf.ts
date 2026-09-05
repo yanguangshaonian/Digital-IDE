@@ -120,7 +120,7 @@ async function exportCurrentFileDocAsPDF(uri: vscode.Uri) {
             }
             
         } catch (error) {
-            MainOutput.report("error happen in export pdf: " + error, {
+            MainOutput.report("导出 PDF 时发生错误：" + error, {
                 level: ReportType.Error
             });
             return;
@@ -129,7 +129,7 @@ async function exportCurrentFileDocAsPDF(uri: vscode.Uri) {
 }
 
 function exportProjectDocAsPDF() {
-    vscode.window.showInformationMessage('this is exportProjectDocAsPDF');   
+    vscode.window.showInformationMessage('此功能用于导出项目 PDF');
 }
 
 export {

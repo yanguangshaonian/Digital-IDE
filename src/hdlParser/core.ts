@@ -926,7 +926,7 @@ class HdlModule {
             }           
             return hdlInstance;
         } else {
-            vscode.window.showErrorMessage(`Unknown Language :${this.languageId} exist in our core program`);
+            vscode.window.showErrorMessage(`无法解析当前文件：不支持的语言类型 ${this.languageId}。`);
             const hdlInstance = new HdlInstance(rawHdlInstance.name,
                                                 rawHdlInstance.type,
                                                 this.path,

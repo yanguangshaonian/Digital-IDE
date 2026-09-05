@@ -284,7 +284,7 @@ class PrjInfo implements PrjInfoMeta {
     public updateToolChain(toolChain?: ToolChainType) {
         if (toolChain) {
             if (!validToolChainType(toolChain)) {
-                vscode.window.showErrorMessage('expect toolChain to be "xilinx", "intel", "custom"');
+                vscode.window.showErrorMessage('工具链配置无效: toolChain 应为 "xilinx", "intel" 或 "custom".');
                 return;
             }
             this._toolChain = toolChain;
@@ -333,12 +333,12 @@ class PrjInfo implements PrjInfoMeta {
             if (IP_REPO instanceof Array) {
                 const invalidIPs = IP_REPO.filter(ip => !validXilinxIP(ip));
                 if (invalidIPs.length > 0) {
-                    vscode.window.showErrorMessage('detect invalid IPs:' + invalidIPs);
+                    vscode.window.showErrorMessage('检测到不支持的 IP 配置: ' + invalidIPs);
                 } else {
                     this._IP_REPO = IP_REPO;
                 }
             } else {
-                vscode.window.showErrorMessage('expect IP_REPO to be list');
+                vscode.window.showErrorMessage('IP_REPO 配置格式错误, 应为数组.');
             }
         }
     }
@@ -404,7 +404,7 @@ class PrjInfo implements PrjInfoMeta {
     public updateArch(arch?: Arch) {
         const workspacePath = this._workspacePath;
         if (arch) {
-            // 如果配置中存在，直接根据用户配置的项来赋值
+            // 如果配置中存在, 直接根据用户配置的项来赋值
             this.arch.structure = 'custom';
 
             this.updatePathWisely(this.arch, 'prjPath', arch.prjPath);
@@ -420,15 +420,15 @@ class PrjInfo implements PrjInfoMeta {
                 this.updatePathWisely(this.arch.software, 'data', arch.software.data);
             }
         } else {
-            // 如果没有，采用默认配置：https://nc-ai-lab.feishu.cn/wiki/IXTnw1K6giLApukuBITcfLitnKg
+            // 如果没有, 采用默认配置: https://nc-ai-lab.feishu.cn/wiki/IXTnw1K6giLApukuBITcfLitnKg
             /**
             "arch" : {
                 "structure" : "standard",
                 "prjPath": "${workspace}/prj",
                 "hardware" : {
-                    "src"  : "${workspace}/user/src",  // 放置设计源文件，注: src上一级为IP&bd
-                    "sim"  : "${workspace}/user/sim",  // 放置仿真文件，会直接反应在树状结构上
-                    "data" : "${workspace}/user/data"  // 放置约束、数据文件，约束会自动添加进vivado工程
+                    "src"  : "${workspace}/user/src",  // 放置设计源文件, 注: src上一级为IP&bd
+                    "sim"  : "${workspace}/user/sim",  // 放置仿真文件, 会直接反应在树状结构上
+                    "data" : "${workspace}/user/data"  // 放置约束, 数据文件, 约束会自动添加进vivado工程
                 },
                 "software" : {
                     "src"  : "${workspace}/user/sdk",
@@ -476,7 +476,7 @@ class PrjInfo implements PrjInfoMeta {
         if (library) {
             if (library.state) {
                 if (!validLibraryState(library.state)) {
-                    vscode.window.showErrorMessage('expect library.state to be "local", "remote"');
+                    vscode.window.showErrorMessage('公共库配置无效: library.state 应为 "local" 或 "remote".');
                     this._library.state = LibraryState.Unknown;
                 } else {
                     this._library.state = library.state;
@@ -578,10 +578,15 @@ class PrjInfo implements PrjInfoMeta {
         this._workspacePath = toSlash(workspacePath);
     }
 
+    private missingCommonLibraryReported = false;
+
     public get libCommonPath(): AbsPath {
         const libPath = join(this._extensionPath, 'library');
-        if (!fs.existsSync(libPath)) {
-            vscode.window.showErrorMessage('common lib path: "' + libPath + '"  in extension is invalid, maybe extension has been corrupted, reinstall the extension');
+        if (!fs.existsSync(libPath) && !this.missingCommonLibraryReported) {
+            this.missingCommonLibraryReported = true;
+            vscode.window.showWarningMessage(`公共库目录不存在: ${libPath}. 当前安装包可能未包含公共库资源, 或目录已被移除; 这不代表插件损坏. 不使用公共库的工程可继续使用, 引用公共库的工程需补齐对应资源. 重装相同安装包不一定能解决.`);
+        } else if (fs.existsSync(libPath)) {
+            this.missingCommonLibraryReported = false;
         }
         return libPath;
     }

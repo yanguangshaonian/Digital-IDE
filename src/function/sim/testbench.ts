@@ -42,21 +42,21 @@ function generateTestbenchFile(langID: HdlLangID, module: HdlModule) {
     }
     try {
         hdlFile.writeFile(tbDisPath, content);
-        MainOutput.report("Generate testbench to " + tbDisPath);
+        MainOutput.report("已生成测试平台：" + tbDisPath);
     } catch (err) {
-        vscode.window.showErrorMessage("Generate testbench failed:" + err);
+        vscode.window.showErrorMessage("生成测试平台失败：" + err);
     }
 }
 
 async function testbench() {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showErrorMessage('please select a editor!');
+        vscode.window.showErrorMessage('请选择一个编辑器！');
         return;
     }
     const uri = editor.document.uri;
     const option = {
-        placeHolder: 'Select a Module to generate testbench'
+        placeHolder: '选择要生成测试平台的模块'
     };
     const path = hdlPath.toSlash(uri.fsPath);
     const langID = hdlFile.getLanguageId(path);
@@ -70,7 +70,7 @@ async function testbench() {
     // console.log(currentHdlFile);
     
     if (!currentHdlFile) {
-        vscode.window.showErrorMessage('There is no hdlFile respect to ' + path);
+        vscode.window.showErrorMessage('找不到对应的 HDL 文件：' + path);
         return;
     }
     const currentHdlModules = currentHdlFile.getAllHdlModules();

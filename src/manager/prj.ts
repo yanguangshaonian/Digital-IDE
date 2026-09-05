@@ -31,7 +31,7 @@ class PrjManage {
      */
     public async generatePropertyJson(context: vscode.ExtensionContext) {
         if (fs.existsSync(opeParam.propertyJsonPath)) {
-            vscode.window.showWarningMessage('property file already exists !!!');
+            vscode.window.showWarningMessage('属性文件已存在!');
             return;
         }
 

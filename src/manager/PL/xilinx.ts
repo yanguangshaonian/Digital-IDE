@@ -1041,7 +1041,7 @@ class XilinxBd {
         }
 
         if (!hdlFile.isFile(bdSrcPath)) {
-            vscode.window.showErrorMessage(`can not find ${select}.bd in ${this.xbdPath} and ${this.bdRepo}, please load again.`);
+            vscode.window.showErrorMessage(`未找到 ${select}.bd；搜索目录：${this.xbdPath}、${this.bdRepo}。请检查路径后重新加载。`);
         } else {
             const docPath = hdlPath.toSlash(uri.fsPath);
             const doc = hdlFile.readFile(docPath);
@@ -1059,14 +1059,14 @@ class XilinxBd {
 
         // 检查是否重复
         if (this.bdEnum.includes(bd_name)) {
-            vscode.window.showWarningMessage(`The file already exists.`);
+            vscode.window.showWarningMessage(`文件已存在，请选择其他名称或位置。`);
             return null;
         }
 
         // 获取存放路径
         let storePath = this.setting.get('digital-ide.prj.xilinx.BD.repo.path', '');
         if (!fs.existsSync(storePath)) {
-            vscode.window.showWarningMessage(`This bd file will be added into extension folder.We don't recommend doing this because it will be cleared in the next update.`);
+            vscode.window.showWarningMessage(`此 BD 文件将被添加到插件安装目录，升级插件时可能被清除。建议保存到工程目录或自定义库。`);
             storePath = this.xbdPath;
         }
 
@@ -1096,7 +1096,7 @@ class XilinxBd {
             }
 
             if (!hdlFile.isFile(bdSrcPath)) {
-                vscode.window.showErrorMessage(`can not find ${select}.bd in ${this.xbdPath} and ${this.bdRepo}, please load again.`);
+                vscode.window.showErrorMessage(`未找到 ${select}.bd；搜索目录：${this.xbdPath}、${this.bdRepo}。请检查路径后重新加载。`);
             } else {
                 hdlFile.removeFile(bdSrcPath);
             }
