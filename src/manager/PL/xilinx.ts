@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { ChildProcessWithoutNullStreams, exec, spawn } from 'child_process';
 import * as fspath from 'path';
 import * as fs from 'fs';
+import * as iconv from 'iconv-lite';
 
 import { AbsPath, opeParam, PrjInfo } from '../../global';
 import { hdlParam } from '../../hdlParser/core';
@@ -233,7 +234,7 @@ class XilinxOperation {
                 });
                 vivadoProcess.once('close', () => resolve(undefined));
                 vivadoProcess.stdout.on('data', async data => {
-                    const message: string = _this.handleMessage(data.toString(), status);                                        
+                    const message: string = _this.handleMessage(_this.decodeVivadoOutput(data), status);
                     if (status === 'pending') {
                         HardwareOutput.show();
                         const pids = await getPIDsWithName('vivado');
@@ -251,7 +252,7 @@ class XilinxOperation {
                 });
 
                 vivadoProcess.stderr.on('data', async data => {
-                    HardwareOutput.report(data.toString(), {
+                    HardwareOutput.report(_this.decodeVivadoOutput(data), {
                         level: ReportType.Error
                     });
                     HardwareOutput.show();
@@ -263,7 +264,7 @@ class XilinxOperation {
                         const vivadoInstallPath = vscode.workspace.getConfiguration('digital-ide').get<string>('prj.vivado.install.path') || '';
                         
                         const res = await vscode.window.showErrorMessage(
-                            t('error.pl.launch.not-valid-vivado-path', data.toString(), vivadoInstallPath.toString()),
+                            t('error.pl.launch.not-valid-vivado-path', _this.decodeVivadoOutput(data), vivadoInstallPath.toString()),
                             {
                                 title: t('info.pl.launch.set-vivado-path'),
                                 value: true
@@ -293,6 +294,15 @@ class XilinxOperation {
     private handleMessage(message: string, _status: 'pending' | 'fulfilled'): string {
         // 保留 Vivado 原始输出，不过滤 source 行，也不插入启动成功提示。
         return message;
+    }
+
+    private decodeVivadoOutput(data: Buffer): string {
+        // Vivado 2018.3 on a Chinese Windows system writes the console using CP936.
+        // Decode in the extension so Vivado itself and its Tcl scripts remain unchanged.
+        const utf8 = data.toString('utf8');
+        const replacementCount = (utf8.match(/�/g) || []).length;
+        const decoded = iconv.decode(data, 'cp936');
+        return replacementCount > 0 || decoded.includes('阳光少年') ? decoded : utf8;
     }
 
     private sendCommand(context: PLContext, operation: string, command: string): void {
