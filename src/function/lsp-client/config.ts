@@ -17,18 +17,44 @@ interface ConfigItem {
 
 type CommonValue = string | boolean | number;
 
+/** One client lifetime owns all listeners and drains running callbacks before stop. */
+export class ClientSubscriptions implements vscode.Disposable {
+    readonly disposables: vscode.Disposable[] = [];
+    private disposed = false;
+    private pending: Promise<void> = Promise.resolve();
+
+    run(action: () => Promise<void>): void {
+        this.pending = this.pending.then(async () => {
+            if (!this.disposed) {
+                await action();
+            }
+        }).catch(error => console.error('LSP listener failed', error));
+    }
+
+    dispose(): void {
+        this.disposed = true;
+        for (const disposable of this.disposables.splice(0)) {
+            disposable.dispose();
+        }
+    }
+
+    async drain(): Promise<void> {
+        await this.pending;
+    }
+}
+
 /**
  * @description 注册配置文件变动时发生的操作
  * 该操作一定发生在 lsp 启动后。
  * @param client 
  * @param packageJson 
  */
-export async function registerConfigurationUpdater(client: LanguageClient, packageJson: any) {
+export async function registerConfigurationUpdater(client: LanguageClient, packageJson: any, subscriptions: ClientSubscriptions) {
     // 常规 lsp 相关的配置
     const lspConfigures: ConfigItem[] = [];
     const properties = packageJson?.contributes?.configuration?.properties;
     const dideConfig = vscode.workspace.getConfiguration('digital-ide');
-    for (const propertyName of Object.keys(properties) || []) {
+    for (const propertyName of Object.keys(properties || {})) {
         if (propertyName.includes('function.lsp')) {
             const section = propertyName.slice(12);
             let value = dideConfig.get<CommonValue>(section, '');
@@ -76,7 +102,7 @@ export async function registerConfigurationUpdater(client: LanguageClient, packa
     );
 
     // 监听配置文件的变化，变化时需要做出的行为
-    vscode.workspace.onDidChangeConfiguration(async event => {
+    subscriptions.disposables.push(vscode.workspace.onDidChangeConfiguration(event => subscriptions.run(async () => {
         const changeConfigs: ConfigItem[] = [];
         const dideConfig = vscode.workspace.getConfiguration('');
         for (const config of lspConfigures) {
@@ -140,17 +166,18 @@ export async function registerConfigurationUpdater(client: LanguageClient, packa
                 await refreshWorkspaceDiagonastics(client, hdlFiles, false, progress);
             });
         }
-    });
+    })));
 }
 
-export async function registerLinter(client: LanguageClient) {
+export async function registerLinter(client: LanguageClient, subscriptions: ClientSubscriptions) {
     // 初始化，配置全部 linter 到 linterManager
-    lspLinter.vlogLinterManager.start(client);
-    lspLinter.vhdlLinterManager.start(client);
-    lspLinter.svlogLinterManager.start(client);
+    for (const manager of [lspLinter.vlogLinterManager, lspLinter.vhdlLinterManager, lspLinter.svlogLinterManager]) {
+        subscriptions.disposables.push(new vscode.Disposable(() => manager.stop(client)));
+        await manager.start(client);
+    }
 
     // 对应配置文件的变动需要修改全局的相关变量
-    vscode.workspace.onDidChangeConfiguration(async event => {        
+    subscriptions.disposables.push(vscode.workspace.onDidChangeConfiguration(event => subscriptions.run(async () => {
         if (event.affectsConfiguration(Linter.getLinterConfigurationName(HdlLangID.Verilog))) {
             await lspLinter.vlogLinterManager.updateCurrentLinterItem(client);
             lspLinter.vlogLinterManager.updateStatusBar();
@@ -165,27 +192,35 @@ export async function registerLinter(client: LanguageClient) {
             await lspLinter.vhdlLinterManager.updateCurrentLinterItem(client);
             lspLinter.vhdlLinterManager.updateStatusBar();
         }
-    });
+    })));
 
     // 切换标签页时的行为
-    vscode.window.onDidChangeActiveTextEditor(async editor => {
+    subscriptions.disposables.push(vscode.window.onDidChangeActiveTextEditor(editor => subscriptions.run(async () => {
         if (!editor) {
+            globalLookup.activeEditor = undefined;
+            return;
+        }
+        // Workspace switching is coordinated by the caller, never by the old client.
+        const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+        if (editor.document.uri.scheme !== 'file' ||
+            folder?.uri.toString() !== client.clientOptions.workspaceFolder?.uri.toString()) {
             return;
         }
         const linterMode = Linter.getLinterMode();
         const currentPath = hdlPath.toEscapePath(editor.document.fileName);
         if (globalLookup.activeEditor && linterMode === 'common') {
             const previousPath = hdlPath.toEscapePath(globalLookup.activeEditor.document.fileName);
-            if (hdlFile.isHDLFile(previousPath)) {
-                clearDiagnostics(client, previousPath);
+            if (hdlFile.isHDLFile(previousPath) &&
+                vscode.workspace.getWorkspaceFolder(globalLookup.activeEditor.document.uri)?.uri.toString() === folder?.uri.toString()) {
+                await clearDiagnostics(client, previousPath);
             }
             if (hdlFile.isHDLFile(currentPath)) {
-                publishDiagnostics(client, currentPath);
+                await publishDiagnostics(client, currentPath);
             }
         }
 
         globalLookup.activeEditor = editor;
-    });
+    })));
 }
 
 /**

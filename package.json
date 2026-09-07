@@ -782,6 +782,11 @@
             ],
             "explorer/context": [
                 {
+                    "when": "explorerResourceIsFolder",
+                    "command": "digital-ide.property-json.generate",
+                    "group": "z_digital_ide@100"
+                },
+                {
                     "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
                     "command": "digital-ide.pl.setSrcTop",
                     "group": "navigation@5"

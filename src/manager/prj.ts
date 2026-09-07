@@ -29,9 +29,24 @@ class PrjManage {
      * @description 生成 .vscode/property.json 
      * @returns 
      */
-    public async generatePropertyJson(context: vscode.ExtensionContext) {
-        if (fs.existsSync(opeParam.propertyJsonPath)) {
-            vscode.window.showWarningMessage('属性文件已存在!');
+    public async generatePropertyJson(context: vscode.ExtensionContext, resource?: vscode.Uri) {
+        let targetFolder = resource && vscode.workspace.getWorkspaceFolder(resource);
+        if (!targetFolder) {
+            const folders = vscode.workspace.workspaceFolders || [];
+            if (folders.length === 1) {
+                targetFolder = folders[0];
+            } else if (folders.length > 1) {
+                targetFolder = await vscode.window.showWorkspaceFolderPick({
+                    placeHolder: '选择要生成 property.json 的工作区文件夹'
+                });
+            }
+        }
+        if (!targetFolder) {
+            return;
+        }
+        const targetPath = hdlPath.join(targetFolder.uri.fsPath, '.vscode', 'property.json');
+        if (fs.existsSync(targetPath)) {
+            vscode.window.showWarningMessage(`属性文件已存在: ${targetPath}`);
             return;
         }
 
@@ -39,12 +54,15 @@ class PrjManage {
         const propertyInitPath = fs.existsSync(cachePPy) ? cachePPy : opeParam.propertyInitPath;
 
         const template = hdlFile.readJSON(propertyInitPath) as RawPrjInfo;
-        hdlFile.writeJSON(opeParam.propertyJsonPath, template);
+        await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(targetFolder.uri, '.vscode'));
+        await vscode.workspace.fs.writeFile(vscode.Uri.file(targetPath), Buffer.from(JSON.stringify(template, null, 4)));
 
-        // 当创建 property.json 时，monitor 似乎无法获取到 ppy 的 add 事件
-        // 所以此处需要手动调用
-        const ppyAction = new PpyAction();
-        await ppyAction.add(opeParam.propertyJsonPath, hdlMonitor);
+        // 非活动工作区的创建不能修改全局上下文；打开配置后走统一的编辑器切换流程。
+        if (targetPath === opeParam.propertyJsonPath) {
+            const ppyAction = new PpyAction();
+            await ppyAction.add(targetPath, hdlMonitor);
+        }
+        await vscode.window.showTextDocument(vscode.Uri.file(targetPath));
     }
 
     /**
@@ -66,7 +84,10 @@ class PrjManage {
         await vscode.window.showTextDocument(uri, options);
     }
 
-    private getWorkspacePath(): AbsPath {
+    private getWorkspacePath(folder?: vscode.WorkspaceFolder): AbsPath {
+        if (folder) {
+            return hdlPath.toSlash(folder.uri.fsPath);
+        }
         if (vscode.workspace.workspaceFolders !== undefined &&
             vscode.workspace.workspaceFolders.length !== 0) {
             const wsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
@@ -79,10 +100,10 @@ class PrjManage {
      * init opeParam
      * @param context 
      */
-    public async initOpeParam(context: vscode.ExtensionContext): Promise<RefreshPrjConfig> {
+    public async initOpeParam(context: vscode.ExtensionContext, folder?: vscode.WorkspaceFolder): Promise<RefreshPrjConfig> {
         const os = process.platform;
         const extensionPath = hdlPath.toSlash(context.extensionPath);
-        const workspacePath = this.getWorkspacePath();
+        const workspacePath = this.getWorkspacePath(folder);
         const propertyJsonPath = hdlPath.join(workspacePath, '.vscode', 'property.json');
         const propertySchemaPath = hdlPath.join(extensionPath, 'project', 'property-schema.json');
         const propertyInitPath = hdlPath.join(extensionPath, 'project', 'property-init.json');

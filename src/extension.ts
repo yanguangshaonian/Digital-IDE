@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 
-import { MainOutput, ReportType, IProgress, globalLookup } from './global';
+import { MainOutput, ReportType, IProgress, globalLookup, opeParam } from './global';
 import { hdlParam } from './hdlParser';
 import * as manager from './manager';
 import * as lspLinter from './function/lsp/linter';
@@ -23,8 +23,8 @@ async function registerCommand(context: vscode.ExtensionContext, packageJson: an
 
     // onCommand 激活事件中的命令
     context.subscriptions.push(
-        vscode.commands.registerCommand('digital-ide.property-json.generate', () => {
-            manager.prjManage.generatePropertyJson(context);
+        vscode.commands.registerCommand('digital-ide.property-json.generate', (resource?: vscode.Uri) => {
+            return manager.prjManage.generatePropertyJson(context, resource);
         })
     );
     context.subscriptions.push(
@@ -74,6 +74,42 @@ async function launch(context: vscode.ExtensionContext) {
 
     // 注册全局变量
     globalLookup.activeEditor = vscode.window.activeTextEditor;
+    let switching = Promise.resolve();
+    let initialized = false;
+    const switchToEditorWorkspace = (editor?: vscode.TextEditor) => {
+        const folder = editor && vscode.workspace.getWorkspaceFolder(editor.document.uri);
+        if (!folder) {
+            return;
+        }
+        switching = switching.then(async () => {
+            if (folder.uri.toString() === vscode.Uri.file(opeParam.workspacePath).toString()) {
+                return;
+            }
+            await hdlMonitor.close();
+            await manager.prjManage.pl?.exit();
+            await lspClient.deactivate();
+            hdlParam.clear();
+            opeParam.resetProjectInfo();
+            const config = await manager.prjManage.initOpeParam(context, folder);
+            await manager.prjManage.refreshPrjFolder(config);
+            await lspClient.activate(context, packageJson);
+            const files = await manager.prjManage.initialise(context, {
+                report() { /* progress is optional during automatic switching */ }
+            } as vscode.Progress<IProgress>);
+            refreshArchTree();
+            hdlMonitor.start();
+            await lspLinter.initialise(context, files, {
+                report() { /* progress is optional during automatic switching */ }
+            } as vscode.Progress<IProgress>);
+        }).catch(error => {
+            vscode.window.showErrorMessage(`Digital-IDE 工作区切换失败: ${String(error)}`);
+        });
+    };
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(editor => {
+        if (initialized) {
+            switchToEditorWorkspace(editor);
+        }
+    }));
 
     await vscode.window.withProgress({
         location: vscode.ProgressLocation.Window,
@@ -81,8 +117,9 @@ async function launch(context: vscode.ExtensionContext) {
     }, async () => {
         // 初始化 OpeParam
         // 包含基本的插件的文件系统信息、用户配置文件和系统配置文件的合并数据结构
-        const refreshPrjConfig = await manager.prjManage.initOpeParam(context);
-        manager.prjManage.refreshPrjFolder(refreshPrjConfig);
+        const folder = vscode.window.activeTextEditor && vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri);
+        const refreshPrjConfig = await manager.prjManage.initOpeParam(context, folder);
+        await manager.prjManage.refreshPrjFolder(refreshPrjConfig);
     });
 
     await vscode.window.withProgress({
@@ -120,6 +157,9 @@ async function launch(context: vscode.ExtensionContext) {
         await lspLinter.initialise(context, hdlFiles, progress);
     });
 
+    initialized = true;
+    switchToEditorWorkspace(vscode.window.activeTextEditor);
+    await switching;
     console.log(hdlParam);
     
     // show welcome information (if first install)
@@ -141,7 +181,7 @@ async function launch(context: vscode.ExtensionContext) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    launch(context);
+    return launch(context);
 }
 
 export function deactivate() {

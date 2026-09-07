@@ -35,7 +35,6 @@ function readJSON(path: AbsPath): object {
     return {};
 }
 
-
 class OpeParam {
     private _os: string = OpeParamDefaults.os;
     private _extensionPath: AbsPath = OpeParamDefaults.extensionPath;
@@ -168,6 +167,13 @@ class OpeParam {
 
     public mergePrjInfo(rawPrjInfo: RawPrjInfo) {
         this.prjInfo.merge(rawPrjInfo);
+    }
+
+    /** 切换项目时清除上一个工作区的项目配置和顶层模块选择。 */
+    public resetProjectInfo() {
+        this._prjInfo = new PrjInfo();
+        this._firstSrcTopModule = { ...OpeParamDefaults.topModule };
+        this._firstSimTopModule = { ...OpeParamDefaults.topModule };
     }
 
     /**

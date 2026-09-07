@@ -15,7 +15,7 @@ import { IProgress, LspClient, opeParam } from '../../global';
 import axios, { AxiosResponse } from "axios";
 import { chooseBestDownloadSource, getLspFileName } from "./cdn";
 import { hdlDir, hdlPath } from "../../hdlFs";
-import { registerConfigurationUpdater, registerLinter } from "./config";
+import { ClientSubscriptions, registerConfigurationUpdater, registerLinter } from "./config";
 import { t } from "../../i18n";
 import { getPlatformPlatformSignature } from "../../global/util";
 
@@ -28,7 +28,6 @@ function getLspServerExecutionName() {
 
     return `digital-lsp-${signature}`;
 }
-
 function extractTarGz(filePath: string, outputDir: string): Promise<void> {
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
@@ -185,7 +184,34 @@ export async function installLsp(context: vscode.ExtensionContext, version: stri
     return false;
 }
 
-export async function activate(context: vscode.ExtensionContext, packageJson: any) {
+let lifecycle: Promise<void> = Promise.resolve();
+let clientSubscriptions: ClientSubscriptions | undefined;
+
+function enqueueLifecycle(action: () => Promise<void>): Promise<void> {
+    const operation = lifecycle.then(action);
+    lifecycle = operation.catch(() => undefined);
+    return operation;
+}
+
+export function activate(context: vscode.ExtensionContext, packageJson: any): Promise<void> {
+    // Capture the root selected by the workspace-switch coordinator, not the first root.
+    const workspaceFolder = opeParam.workspacePath
+        ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(opeParam.workspacePath))
+        : undefined;
+    const toolChain = opeParam.prjInfo.toolChain;
+    return enqueueLifecycle(async () => {
+        await stopClient();
+        try {
+            await startClient(context, packageJson, workspaceFolder, toolChain);
+        } catch (error) {
+            await stopClient();
+            throw error;
+        }
+    });
+}
+
+async function startClient(context: vscode.ExtensionContext, packageJson: any,
+    workspaceFolder: vscode.WorkspaceFolder | undefined, toolChain: typeof opeParam.prjInfo.toolChain) {
     const version = packageJson.version;
     await checkAndDownload(context, version);
 
@@ -210,12 +236,6 @@ export async function activate(context: vscode.ExtensionContext, packageJson: an
         run,
         debug: run,
     };
-
-    let workspaceFolder: undefined | { uri: vscode.Uri, name: string, index: number } = undefined;
-    if (vscode.workspace.workspaceFolders) {
-        const currentWsFolder = vscode.workspace.workspaceFolders[0];
-        workspaceFolder = currentWsFolder;
-    }
 
     let extensionPath = hdlPath.toSlash(context.extensionPath);
 
@@ -242,7 +262,7 @@ export async function activate(context: vscode.ExtensionContext, packageJson: an
         workspaceFolder,
         initializationOptions: {
             extensionPath,
-            toolChain: opeParam.prjInfo.toolChain,
+            toolChain,
             version: version
         }
     };
@@ -254,24 +274,35 @@ export async function activate(context: vscode.ExtensionContext, packageJson: an
         clientOptions
     );
     LspClient.DigitalIDE = client;
+    const subscriptions = new ClientSubscriptions();
+    clientSubscriptions = subscriptions;
     
     // 启动 lsp
     await client.start();
 
     // 检测配置文件变动
-    await registerConfigurationUpdater(client, packageJson);
+    await registerConfigurationUpdater(client, packageJson, subscriptions);
 
     // 配置诊断器
-    await registerLinter(client);
+    await registerLinter(client, subscriptions);
 }
 
 
 
 
-export function deactivate(): Thenable<void> | undefined {
-    if (!LspClient.DigitalIDE) {
-        return undefined;
+async function stopClient(): Promise<void> {
+    const subscriptions = clientSubscriptions;
+    clientSubscriptions = undefined;
+    subscriptions?.dispose();
+    await subscriptions?.drain();
+    const client = LspClient.DigitalIDE;
+    if (client) {
+        await client.stop();
+        LspClient.DigitalIDE = undefined;
     }
-    return LspClient.DigitalIDE.stop();
+}
+
+export function deactivate(): Promise<void> {
+    return enqueueLifecycle(stopClient);
 }
 

@@ -69,10 +69,12 @@ class HdlMonitor{
         return this.makeMonitor(watcherPath);
     }
 
-    public close() {
-        this.hdlMonitor?.close();
-        this.ppyMonitor?.close();
-        this.ignoreMonitor?.close();
+    public async close() {
+        await Promise.all([
+            this.hdlMonitor?.close(),
+            this.ppyMonitor?.close(),
+            this.ignoreMonitor?.close()
+        ]);
     }
 
     public start() {

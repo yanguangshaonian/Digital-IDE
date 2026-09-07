@@ -41,6 +41,7 @@ export class LinterManager {
      * @description 绑定的 lsp，当 started 为 true 时，该值一定不为 undefined
      */
     lspClient: LanguageClient | undefined;
+    private readonly disposables: vscode.Disposable[] = [];
 
     constructor(langID: HdlLangID, supportLinters: SupportLinterName[]) {
         this.langID = langID;
@@ -53,8 +54,6 @@ export class LinterManager {
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right);
         this.statusBarItem.command = this.getLinterPickCommand();
 
-        // 对切换时间进行监听，如果不是目前的语言，则隐藏
-        this.registerActiveTextEditorChangeEvent(langID);
     }
 
     /**
@@ -84,7 +83,10 @@ export class LinterManager {
         client = client ? client : this.lspClient;
         if (client) {
             const linterName = getLinterName(this.langID);
-            this.currentLinterItem = await makeLinterNamePickItem(client, this.langID, linterName);
+            const item = await makeLinterNamePickItem(client, this.langID, linterName);
+            if (this.lspClient === client) {
+                this.currentLinterItem = item;
+            }
         }
     }
 
@@ -93,20 +95,20 @@ export class LinterManager {
      * @returns 
      */
     async start(client: LanguageClient): Promise<void> {
-        // 根据配置选择对应的诊断器
-        await this.updateCurrentLinterItem(client);
-
         // 注册内部命令
         if (!this.started) {
             const pickerCommand = this.getLinterPickCommand();
-            vscode.commands.registerCommand(pickerCommand, () => {
-                this.pickLinter();
-            });
+            this.disposables.push(vscode.commands.registerCommand(pickerCommand, () => this.pickLinter()));
+            this.registerActiveTextEditorChangeEvent(this.langID);
         }
 
         // 保证幂等
         this.started = true;
         this.lspClient = client;
+        await this.updateCurrentLinterItem(client);
+        if (this.lspClient !== client) {
+            return;
+        }
 
         // 如果当前窗口语言为绑定语言，则显示 bar；否则，隐藏它
         const editor = vscode.window.activeTextEditor;
@@ -164,9 +166,23 @@ export class LinterManager {
         }
     }
 
+    public stop(client: LanguageClient): void {
+        if (this.lspClient !== client) {
+            return;
+        }
+        for (const disposable of this.disposables.splice(0)) {
+            disposable.dispose();
+        }
+        this.started = false;
+        this.lspClient = undefined;
+        this.currentLinterItem = undefined;
+        this.statusBarItem.hide();
+    }
+
     private registerActiveTextEditorChangeEvent(langID: HdlLangID) {
-        vscode.window.onDidChangeActiveTextEditor(editor => {
+        this.disposables.push(vscode.window.onDidChangeActiveTextEditor(editor => {
             if (!editor) {
+                this.statusBarItem.hide();
                 return;
             }
             const currentFileName = hdlPath.toSlash(editor.document.fileName);
@@ -176,7 +192,7 @@ export class LinterManager {
             } else {
                 this.statusBarItem.hide();
             }
-        });
+        }));
     }
 
     private makePickTitle() {
@@ -270,6 +286,15 @@ export async function publishDiagnostics(
     client: LanguageClient,
     path: string
 ) {
+    // An active editor can move to another root before the coordinator restarts LSP.
+    const root = client.clientOptions.workspaceFolder?.uri.toString();
+    const selectedRoot = opeParam.workspacePath
+        ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(opeParam.workspacePath))?.uri.toString()
+        : undefined;
+    if (!client.isRunning() || root !== selectedRoot ||
+        vscode.workspace.getWorkspaceFolder(vscode.Uri.file(path))?.uri.toString() !== root) {
+        return;
+    }
     // 找到所有的库前缀，进行诊断（用于 verilator）
     await client.sendRequest("workspace/executeCommand", {
         command: 'publish-diagnostics',

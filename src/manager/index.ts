@@ -37,8 +37,21 @@ export function registerManagerCommands(context: vscode.ExtensionContext) {
     assert(prjManage.pl, '硬件管理器未初始化');
     assert(prjManage.ps, '软件管理器未初始化');
 
-    const plManage = prjManage.pl;
-    const psManage = prjManage.ps;
+    // 命令只注册一次，但每次调用必须使用切换后创建的管理器。
+    const plManage = new Proxy(prjManage.pl, {
+        get(_target, key) {
+            const current = prjManage.pl!;
+            const value = Reflect.get(current, key);
+            return typeof value === 'function' ? value.bind(current) : value;
+        }
+    });
+    const psManage = new Proxy(prjManage.ps, {
+        get(_target, key) {
+            const current = prjManage.ps!;
+            const value = Reflect.get(current, key);
+            return typeof value === 'function' ? value.bind(current) : value;
+        }
+    });
 
     // libpick 
     vscode.commands.registerCommand('digital-ide.pickLibrary', pickLibrary);

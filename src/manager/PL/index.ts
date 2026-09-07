@@ -146,7 +146,7 @@ class PlManage extends BaseManage {
             return;
         }
         HardwareOutput.show();        
-        this.dispatch('exit');
+        await this.dispatch('exit');
     }
 
     public setSrcTop(item: ModuleDataItem) {        
