@@ -10,7 +10,9 @@ import { hdlMonitor } from './monitor';
 
 import * as lspClient from './function/lsp-client';
 import { refreshArchTree } from './function/treeView';
+import { moduleTreeProvider } from './function/treeView/tree';
 import { initialiseI18n, t } from './i18n';
+import { configureWorkspaceContext, runInWorkspace } from './manager/workspaceContext';
 
 
 async function registerCommand(context: vscode.ExtensionContext, packageJson: any) {
@@ -74,14 +76,8 @@ async function launch(context: vscode.ExtensionContext) {
 
     // 注册全局变量
     globalLookup.activeEditor = vscode.window.activeTextEditor;
-    let switching = Promise.resolve();
     let initialized = false;
-    const switchToEditorWorkspace = (editor?: vscode.TextEditor) => {
-        const folder = editor && vscode.workspace.getWorkspaceFolder(editor.document.uri);
-        if (!folder) {
-            return;
-        }
-        switching = switching.then(async () => {
+    const prepareWorkspace = async (folder: vscode.WorkspaceFolder) => {
             if (folder.uri.toString() === vscode.Uri.file(opeParam.workspacePath).toString()) {
                 return;
             }
@@ -90,6 +86,7 @@ async function launch(context: vscode.ExtensionContext) {
             await lspClient.deactivate();
             hdlParam.clear();
             opeParam.resetProjectInfo();
+            moduleTreeProvider.resetTopSelection();
             const config = await manager.prjManage.initOpeParam(context, folder);
             await manager.prjManage.refreshPrjFolder(config);
             await lspClient.activate(context, packageJson);
@@ -101,7 +98,12 @@ async function launch(context: vscode.ExtensionContext) {
             await lspLinter.initialise(context, files, {
                 report() { /* progress is optional during automatic switching */ }
             } as vscode.Progress<IProgress>);
-        }).catch(error => {
+    };
+    const switchToEditorWorkspace = (editor?: vscode.TextEditor) => {
+        if (!editor || !vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
+            return Promise.resolve();
+        }
+        return runInWorkspace(editor.document.uri, async () => undefined).catch(error => {
             vscode.window.showErrorMessage(`Digital-IDE 工作区切换失败: ${String(error)}`);
         });
     };
@@ -158,8 +160,8 @@ async function launch(context: vscode.ExtensionContext) {
     });
 
     initialized = true;
-    switchToEditorWorkspace(vscode.window.activeTextEditor);
-    await switching;
+    configureWorkspaceContext(prepareWorkspace);
+    await switchToEditorWorkspace(vscode.window.activeTextEditor);
     console.log(hdlParam);
     
     // show welcome information (if first install)

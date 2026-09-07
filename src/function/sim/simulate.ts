@@ -15,6 +15,7 @@ import { t } from '../../i18n';
 import { openWaveViewer } from '../dide-viewer';
 import { HdlDependence } from '../../hdlParser/common';
 import { collectWaveOutput } from './waveOutput';
+import { prjManage } from '../../manager/prj';
 
 type Path = string;
 
@@ -584,6 +585,15 @@ export class IcarusSimulate extends Simulate {
     }
 
     public async simulateFile(view: ModuleDataItem) {
+        // 仿真前重新解析当前项目，避免文件重命名/保存后的旧实例依赖遗漏设计源。
+        const files = await prjManage.getPrjHardwareFiles();
+        for (const file of hdlParam.getAllHdlFiles()) {
+            if (!fs.existsSync(file.path)) {
+                hdlParam.deleteHdlFile(file.path);
+            }
+        }
+        await hdlParam.initializeHdlFiles(files, { report() {} });
+        await hdlParam.makeAllInstance();
         const targetModule = await this.tryGetModuleFromView(view);
 
         if (targetModule !== undefined) {

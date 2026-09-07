@@ -107,6 +107,16 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
         this._onDidChangeTreeData.fire(this.simRootItem);
     }
 
+    public resetTopSelection(type?: keyof FirstTop) {
+        const types: (keyof FirstTop)[] = type ? [type] : ['src', 'sim'];
+        for (const key of types) {
+            this.firstTop[key] = null;
+            const top = key === 'src' ? opeParam.firstSrcTopModule : opeParam.firstSimTopModule;
+            top.name = '';
+            top.path = undefined;
+        }
+    }
+
 
     public getTreeItem(element: ModuleDataItem): vscode.TreeItem | Thenable<vscode.TreeItem> {
         let itemName = element.name;
@@ -208,16 +218,25 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
             // 默认选择依赖模块最多的作为 first top
             let firstTop = this.firstTop[type];
 
+            if (firstTop && !topModuleItemList.some(item =>
+                item.name === firstTop!.name && item.path === firstTop!.path)) {
+                this.resetTopSelection(type);
+                firstTop = null;
+            }
+
             if (!firstTop) {
-                let maxDepSize = 0;            
+                let maxDepSize = -1;
                 for (const hdlModule of topModules) {
                     // 此处断言是因为当前的 name 和 path 是从 topModules 中提取的
                     // 它们对应的 hdlModule 一定存在
-                    const deps = hdlParam.getAllDependences(hdlModule.path, hdlModule.name)!;
-                    const depSize = deps.include.length + deps.others.length;
+                    const deps = hdlParam.getAllDependences(hdlModule.path, hdlModule.name);
+                    const depSize = deps ? deps.include.length + deps.others.length : 0;
                     if (depSize > maxDepSize) {
                         maxDepSize = depSize;
-                        firstTop = { path: hdlModule.path, name: hdlModule.name };
+                        firstTop = {
+                            path: hdlModule.path,
+                            name: hdlModule.archName === undefined ? hdlModule.name : `${hdlModule.name}(${hdlModule.archName})`
+                        };
                     }
                 }
 
@@ -237,7 +256,11 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
             const firstTopIcon = this.makeFirstTopIconName(type);
 
             // 将 topModuleItemList 中的 first top 元素调整到第一个位置
-            const dataItem = topModuleItemList.filter(item => item.name === firstTop!.name && item.path === firstTop!.path)[0];
+            const dataItem = topModuleItemList.find(item => item.name === firstTop!.name && item.path === firstTop!.path);
+            if (!dataItem) {
+                this.resetTopSelection(type);
+                return topModuleItemList;
+            }
             dataItem.icon = firstTopIcon;
             let newTopModuleItemList = [dataItem];
             newTopModuleItemList = newTopModuleItemList.concat(topModuleItemList.filter(item => item !== dataItem));
@@ -245,6 +268,7 @@ class ModuleTreeProvider implements vscode.TreeDataProvider<ModuleDataItem> {
             return newTopModuleItemList;
         }
 
+        this.resetTopSelection(moduleType);
         return topModuleItemList;
     }
 

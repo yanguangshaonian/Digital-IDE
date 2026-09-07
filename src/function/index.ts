@@ -18,6 +18,7 @@ import * as WaveView from './dide-viewer';
 import { ModuleDataItem } from './treeView/tree';
 import { downloadLsp, installLsp } from './lsp-client';
 import { hdlPath } from '../hdlFs';
+import { runInWorkspace } from '../manager/workspaceContext';
 
 function registerDocumentation(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('digital-ide.hdlDoc.showWebview', async (uri: vscode.Uri) => {
@@ -59,10 +60,30 @@ function registerDocumentation(context: vscode.ExtensionContext) {
 function registerSimulation(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('digital-ide.tool.instance', sim.instantiation);
     vscode.commands.registerCommand('digital-ide.tool.testbench', sim.testbench);
-    vscode.commands.registerCommand('digital-ide.tool.icarus.simulateFile', (view: ModuleDataItem) => {
-        const icarus = new sim.IcarusSimulate(context);
-        icarus.simulateFile(view);
-    });
+    context.subscriptions.push(vscode.commands.registerCommand('digital-ide.tool.icarus.simulateFile',
+        async (resource?: ModuleDataItem | vscode.Uri) => {
+            const uri = resource instanceof vscode.Uri ? resource :
+                resource?.path ? vscode.Uri.file(resource.path) : vscode.window.activeTextEditor?.document.uri;
+            if (!uri) {
+                return;
+            }
+            const view = {
+                path: hdlPath.toSlash(uri.fsPath),
+                name: resource && !(resource instanceof vscode.Uri) ? resource.name : undefined
+            } as ModuleDataItem;
+            try {
+                return await runInWorkspace(uri, async () => {
+                    const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
+                    if (document?.isDirty && !await document.save()) {
+                        throw new Error('仿真文件保存失败，已取消仿真。');
+                    }
+                    const icarus = new sim.IcarusSimulate(context);
+                    return icarus.simulateFile(view);
+                });
+            } catch (error) {
+                vscode.window.showErrorMessage(`Icarus 仿真失败: ${String(error)}`);
+            }
+        }));
 }
 
 function registerFunctionCommands(context: vscode.ExtensionContext) {

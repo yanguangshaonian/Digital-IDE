@@ -1,0 +1,38 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const ts = require('typescript');
+const exportsObject = {};
+const code = ts.transpileModule(fs.readFileSync('src/manager/workspaceContext.ts', 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
+}).outputText;
+vm.runInNewContext(code, { exports: exportsObject, require: () => ({
+    workspace: { getWorkspaceFolder: uri => uri.folder ? { name: uri.folder } : undefined }
+}) });
+const { runInWorkspace, configureWorkspaceContext } = exportsObject;
+(async () => {
+    const events = [];
+    let active = 'Digital-IDE';
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    // A simulation invoked before startup completion must wait.
+    const first = runInWorkspace({ folder: '02_mux2' }, async () => {
+        assert.equal(active, '02_mux2');
+        events.push('simulate');
+        await pending;
+        assert.equal(active, '02_mux2');
+    });
+    configureWorkspaceContext(async folder => {
+        await Promise.resolve();
+        active = folder.name;
+        events.push(active);
+    });
+    const second = runInWorkspace({ folder: '01_mux2' }, async () => events.push('next'));
+    release();
+    await Promise.all([first, second]);
+    assert.deepEqual(events, ['02_mux2', 'simulate', '01_mux2', 'next']);
+    await assert.rejects(runInWorkspace({}, async () => {}));
+    await assert.rejects(runInWorkspace({ folder: '02_mux2' }, async () => { throw Error('failure'); }));
+    await runInWorkspace({ folder: '01_mux2' }, async () => assert.equal(active, '01_mux2'));
+    console.log('PASS: startup wait, target root, serialized simulation, outside-root rejection, failure recovery');
+})().catch(error => { console.error(error); process.exitCode = 1; });
