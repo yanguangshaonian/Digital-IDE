@@ -4,16 +4,25 @@ import * as assert from 'assert';
 import { prjManage } from './prj';
 import { pickLibrary } from './libPick';
 import { HardwareOutput, ReportType } from '../global/outputChannel';
+import { opeParam } from '../global';
+import { runInWorkspace } from './workspaceContext';
+import { XilinxOperation } from './PL/xilinx';
+import { openWaveViewer } from '../function/dide-viewer';
 
 // 不输出入口参数或环境变量；保留异常堆栈以便定位分发失败。
 function registerHardwareCommand(command: string, callback: (...args: any[]) => any) {
-    vscode.commands.registerCommand(command, (...args: any[]) => {
+    vscode.commands.registerCommand(command, async (...args: any[]) => {
         HardwareOutput.report(`[VS Code 硬件命令入口] 收到命令: ${command}`);
         const reportFailure = (error: unknown) => HardwareOutput.report(`[硬件命令失败] 命令=${command}; 错误=${error instanceof Error ? error.stack || error.message : String(error)}; 错误继续向上传播.`, {
             level: ReportType.Error
         });
         try {
-            const result = callback(...args);
+            const resource = args[0] instanceof vscode.Uri ? args[0] :
+                args[0]?.path ? vscode.Uri.file(args[0].path) :
+                vscode.window.activeTextEditor?.document.uri;
+            const target = resource && vscode.workspace.getWorkspaceFolder(resource) ? resource :
+                vscode.Uri.file(opeParam.workspacePath);
+            const result = await runInWorkspace(target, async () => callback(...args));
             if (result instanceof Promise) {
                 return result.catch((error: unknown) => {
                     reportFailure(error);
@@ -75,6 +84,21 @@ export function registerManagerCommands(context: vscode.ExtensionContext) {
     registerHardwareCommand('digital-ide.hard.simulate', () => plManage.simulate());
     registerHardwareCommand('digital-ide.hard.simulate.cli', () => plManage.simulateCli());
     registerHardwareCommand('digital-ide.hard.simulate.gui', () => plManage.simulateGui());
+    registerHardwareCommand('digital-ide.hard.simulate.vcd', async () => {
+        const hardware = prjManage.pl;
+        if (!hardware || !(hardware.context.ope instanceof XilinxOperation)) {
+            throw new Error('VCD 导出模式目前只支持 Vivado。');
+        }
+        const duration = await vscode.window.showInputBox({
+            title: 'Vivado → VCD → VS Code',
+            prompt: '从 0 时刻重新仿真，输入运行时长（ns）；会重置当前仿真。',
+            value: '2000',
+            validateInput: value => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? undefined : '请输入正整数纳秒数'
+        });
+        if (duration === undefined) { return; }
+        const output = await hardware.context.ope.exportVcd(hardware.context, Number(duration));
+        await openWaveViewer(context, vscode.Uri.file(output));
+    });
     registerHardwareCommand('digital-ide.hard.refresh', () => plManage.refresh());
     registerHardwareCommand('digital-ide.hard.build', () => plManage.build());
     registerHardwareCommand('digital-ide.hard.build.synth', () => plManage.synth());

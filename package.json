@@ -477,6 +477,11 @@
                 "title": "%digital-ide.hard.simulate.cli.title%"
             },
             {
+                "command": "digital-ide.hard.simulate.vcd",
+                "category": "Digital-IDE",
+                "title": "Vivado 仿真：导出 VCD 并在 VS Code 打开"
+            },
+            {
                 "command": "digital-ide.hard.simulate.gui",
                 "category": "Digital-IDE",
                 "title": "%digital-ide.hard.simulate.gui.title%"

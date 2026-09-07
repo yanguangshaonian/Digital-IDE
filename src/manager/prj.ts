@@ -9,6 +9,7 @@ import { RawPrjInfo } from '../global/prjInfo';
 import { hdlDir, hdlFile, hdlPath } from '../hdlFs';
 import { hdlParam } from '../hdlParser';
 import { PlManage } from './PL';
+import { XilinxOperation } from './PL/xilinx';
 import { PsManage } from './PS';
 import { hdlIgnore } from './ignore';
 import { hdlMonitor } from '../monitor';
@@ -22,6 +23,26 @@ interface RefreshPrjConfig {
 }
 
 class PrjManage {
+    private readonly hardwareSessions = new Map<string, PlManage>();
+
+    public async removeHardwareSession(uri: vscode.Uri) {
+        const key = uri.toString();
+        const session = this.hardwareSessions.get(key);
+        if (!session) { return; }
+        await session.exit();
+        // A timeout rejects above; never discard a still-live session.
+        this.hardwareSessions.delete(key);
+        if (this.pl === session) { this.pl = undefined; }
+    }
+
+    public async closeHardwareSessions() {
+        const results = await Promise.allSettled([...this.hardwareSessions.values()].map(session => session.exit()));
+        for (const result of results) {
+            if (result.status === 'rejected') {
+                MainOutput.report(String(result.reason), { level: ReportType.Error });
+            }
+        }
+    }
     pl?: PlManage;
     ps?: PsManage;
 
@@ -242,7 +263,16 @@ class PrjManage {
             level: ReportType.Launch
         });
 
-        this.pl = new PlManage();
+        const workspaceKey = vscode.Uri.file(opeParam.workspacePath).toString();
+        let hardware = this.hardwareSessions.get(workspaceKey);
+        if (!hardware) {
+            hardware = new PlManage();
+            this.hardwareSessions.set(workspaceKey, hardware);
+        }
+        this.pl = hardware;
+        if (hardware.context.ope instanceof XilinxOperation) {
+            hardware.context.ope.bindActiveProject();
+        }
         this.ps = new PsManage();
 
         if (countTimeCost) {

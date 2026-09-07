@@ -108,6 +108,11 @@ class HardwareTreeProvider extends BaseCommandTreeProvider {
                         icon: 'branch',
                         tip: 'Launch the manufacturer Simulation in GUI'
                     },
+                    VCD: {
+                        cmd: 'digital-ide.hard.simulate.vcd',
+                        icon: 'branch',
+                        tip: 'Vivado simulation: export VCD and open in VS Code'
+                    },
                 }
             },
             Refresh: {

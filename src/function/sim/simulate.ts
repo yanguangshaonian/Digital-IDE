@@ -366,7 +366,7 @@ export class IcarusSimulate extends Simulate {
             return;
         }
 
-        this.runIverilog(simConfig, command, cwd, hdlModule);
+        return this.runIverilog(simConfig, command, cwd, hdlModule);
     }
 
     private reportCommandError(command: string, stderr: string) {
@@ -381,10 +381,12 @@ export class IcarusSimulate extends Simulate {
     /**
      * @description 运行 iverilog xxx 的命令
      */
-    private runIverilog(simConfig: SimulateConfig, command: string, cwd: string, hdlModule: HdlModule) {
-        child_process.exec(command, { cwd }, (error, stdout, stderr) => {
+    private async runIverilog(simConfig: SimulateConfig, command: string, cwd: string, hdlModule: HdlModule) {
+        const vvpCwd = opeParam.openMode === 'file' ? cwd : opeParam.workspacePath;
+        await new Promise<void>((resolve, reject) => child_process.exec(command, { cwd }, (error, stdout, stderr) => {
             if (error) {
                 this.reportCommandError(command, stderr);
+                reject(error);
                 return;
             }
 
@@ -402,28 +404,30 @@ export class IcarusSimulate extends Simulate {
             // 运行 vvp 文件，执行目录在生成的 vcd 的同级目录
             // 对于 vvp 执行的 cwd，为了方便用户可以调用 $readmemb $fopen $dumpfile
             // 这些系统调用进行 IO，所以选择 {workspace} 作为执行 vvp 的 cwd
-            const vvpCwd = opeParam.openMode === 'file' ? cwd: opeParam.workspacePath;
-
-            const vvpCommand = `${vvpPath} ${outVvpPath}`;
+            const vvpCommand = `${makeSafeArgPath(vvpPath)} ${makeSafeArgPath(outVvpPath)}`;
             // MainOutput.report(vvpCommand, { level: ReportType.Run });
             
-            this.runVvp(vvpCommand, vvpCwd);
-        });
+            this.runVvp(vvpCommand, vvpCwd).then(resolve, reject);
+        }));
     }
 
     /**
      * @description 运行 vvp xxx 的命令
      */
-    private runVvp(command: string, cwd: string) {
-        child_process.exec(command, { cwd }, (error, stdout, stderr) => {
+    private runVvp(command: string, cwd: string): Promise<void> {
+        return new Promise<void>((resolve, reject) => child_process.exec(command, { cwd }, (error, stdout, stderr) => {
             if (error) {
                 this.reportCommandError(command, stderr);
+                reject(error);
                 return;
             }
 
             // 对于 vvp 的输出结果，特殊处理
-            this.handleVvpStdOutput(stdout, command, cwd);
-        });
+            try {
+                this.handleVvpStdOutput(stdout, command, cwd);
+                resolve();
+            } catch (failure) { reject(failure); }
+        }));
     }
 
     /**
@@ -475,7 +479,7 @@ export class IcarusSimulate extends Simulate {
                     hdlDir.mkdir(parentFolderPath);
                     // 清除输出，准备第二次运行
                     MainOutput.clear();
-                    this.runVvp(command, cwd);
+                    MainOutput.report('已创建波形输出目录，请重新运行仿真。', { level: ReportType.Warn });
                 } else {
                     // 没有匹配到，说明是其他错误，直接按照错误输出
                     MainOutput.report(line.slice(10).trim(), { level: ReportType.Error });
@@ -502,7 +506,7 @@ export class IcarusSimulate extends Simulate {
             this.execInTerminal(command, cwd, hdlModule);
         } else {
             MainOutput.show();
-            this.execInOutput(command, cwd, hdlModule);
+            return this.execInOutput(command, cwd, hdlModule);
         }
     }
 
@@ -528,7 +532,7 @@ export class IcarusSimulate extends Simulate {
         const simulationCommand = this.getCommand(name, path, dependences);
         if (simulationCommand) {
             const cwd = hdlPath.resolve(path, '..');   
-            this.exec(simulationCommand, cwd, hdlModule);
+            return this.exec(simulationCommand, cwd, hdlModule);
         } else {
             const errorMsg = '无法生成命令';
             MainOutput.report(errorMsg, {
@@ -597,7 +601,7 @@ export class IcarusSimulate extends Simulate {
         const targetModule = await this.tryGetModuleFromView(view);
 
         if (targetModule !== undefined) {
-            this.simulateByHdlModule(targetModule);
+            return this.simulateByHdlModule(targetModule);
         } else {
             MainOutput.report('在 ' + view.path + ' 中找不到名为 ' + view.name + ' 的模块', {
                 level: ReportType.Error,

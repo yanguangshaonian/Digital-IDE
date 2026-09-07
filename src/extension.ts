@@ -12,7 +12,7 @@ import * as lspClient from './function/lsp-client';
 import { refreshArchTree } from './function/treeView';
 import { moduleTreeProvider } from './function/treeView/tree';
 import { initialiseI18n, t } from './i18n';
-import { configureWorkspaceContext, runInWorkspace } from './manager/workspaceContext';
+import { configureWorkspaceContext, followEditorWorkspace, failWorkspaceContext, stopWorkspaceContext, enqueueWorkspaceCleanup } from './manager/workspaceContext';
 
 
 async function registerCommand(context: vscode.ExtensionContext, packageJson: any) {
@@ -77,12 +77,13 @@ async function launch(context: vscode.ExtensionContext) {
     // 注册全局变量
     globalLookup.activeEditor = vscode.window.activeTextEditor;
     let initialized = false;
+    let preparedWorkspace = '';
     const prepareWorkspace = async (folder: vscode.WorkspaceFolder) => {
-            if (folder.uri.toString() === vscode.Uri.file(opeParam.workspacePath).toString()) {
+            if (folder.uri.toString() === preparedWorkspace) {
                 return;
             }
+            preparedWorkspace = '';
             await hdlMonitor.close();
-            await manager.prjManage.pl?.exit();
             await lspClient.deactivate();
             hdlParam.clear();
             opeParam.resetProjectInfo();
@@ -98,12 +99,13 @@ async function launch(context: vscode.ExtensionContext) {
             await lspLinter.initialise(context, files, {
                 report() { /* progress is optional during automatic switching */ }
             } as vscode.Progress<IProgress>);
+            preparedWorkspace = folder.uri.toString();
     };
     const switchToEditorWorkspace = (editor?: vscode.TextEditor) => {
         if (!editor || !vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
             return Promise.resolve();
         }
-        return runInWorkspace(editor.document.uri, async () => undefined).catch(error => {
+        return followEditorWorkspace(editor.document.uri).catch(error => {
             vscode.window.showErrorMessage(`Digital-IDE 工作区切换失败: ${String(error)}`);
         });
     };
@@ -111,6 +113,27 @@ async function launch(context: vscode.ExtensionContext) {
         if (initialized) {
             switchToEditorWorkspace(editor);
         }
+    }));
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(event => {
+        void enqueueWorkspaceCleanup(async () => {
+            for (const folder of event.removed) {
+                if (folder.uri.toString() === vscode.Uri.file(opeParam.workspacePath).toString()) {
+                    preparedWorkspace = '';
+                    await hdlMonitor.close();
+                    await lspClient.deactivate();
+                    hdlParam.clear();
+                    moduleTreeProvider.resetTopSelection();
+                    refreshArchTree();
+                }
+                try {
+                    await manager.prjManage.removeHardwareSession(folder.uri);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`工作区已移除，但 Vivado 尚未退出，仍保留会话: ${String(error)}`);
+                }
+            }
+        }).then(() => switchToEditorWorkspace(vscode.window.activeTextEditor)).catch(error => {
+            vscode.window.showErrorMessage(`工作区移除清理失败: ${String(error)}`);
+        });
     }));
 
     await vscode.window.withProgress({
@@ -160,6 +183,7 @@ async function launch(context: vscode.ExtensionContext) {
     });
 
     initialized = true;
+    preparedWorkspace = vscode.Uri.file(opeParam.workspacePath).toString();
     configureWorkspaceContext(prepareWorkspace);
     await switchToEditorWorkspace(vscode.window.activeTextEditor);
     console.log(hdlParam);
@@ -183,10 +207,18 @@ async function launch(context: vscode.ExtensionContext) {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-    return launch(context);
+    return launch(context).catch(error => {
+        failWorkspaceContext(error);
+        throw error;
+    });
 }
 
-export function deactivate() {
-    lspClient.deactivate();
-    manager.prjManage.pl?.exit();
+export async function deactivate() {
+    await stopWorkspaceContext();
+    await hdlMonitor.close();
+    try {
+        await manager.prjManage.closeHardwareSessions();
+    } finally {
+        await lspClient.deactivate();
+    }
 }

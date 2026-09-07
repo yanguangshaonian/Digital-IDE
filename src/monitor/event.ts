@@ -25,7 +25,7 @@ export abstract class BaseAction {
             });
             return;
         }
-        fSWatcher.on(Event.Change, path => this.change(path, m));
+        fSWatcher.on(Event.Change, path => m.dispatch(fSWatcher, () => this.change(path, m)));
     }
 
     public listenAdd(m: HdlMonitor) {
@@ -36,7 +36,7 @@ export abstract class BaseAction {
             });
             return;
         }
-        fSWatcher.on(Event.Add, path => this.add(path, m));
+        fSWatcher.on(Event.Add, path => m.dispatch(fSWatcher, () => this.add(path, m)));
     }
 
     public listenUnlink(m: HdlMonitor) {
@@ -47,7 +47,7 @@ export abstract class BaseAction {
             });
             return;
         }
-        fSWatcher.on(Event.Unlink, path => this.unlink(path, m));
+        fSWatcher.on(Event.Unlink, path => m.dispatch(fSWatcher, () => this.unlink(path, m)));
     }
 
     abstract selectFSWatcher(m: HdlMonitor): chokidar.FSWatcher | undefined;

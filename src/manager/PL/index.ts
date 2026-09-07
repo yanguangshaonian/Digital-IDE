@@ -85,7 +85,7 @@ class PlManage extends BaseManage {
     }
 
     public launch() {
-        this.dispatch('launch');
+        return this.dispatch('launch');
     }
 
     public simulate() {
@@ -97,11 +97,11 @@ class PlManage extends BaseManage {
     }
 
     public simulateCli() {
-        this.dispatch('simulateCli');
+        return this.dispatch('simulateCli');
     }
 
     public simulateGui() {
-        this.dispatch('simulateGui');
+        return this.dispatch('simulateGui');
     }
 
     public refresh() {
@@ -113,11 +113,11 @@ class PlManage extends BaseManage {
     }
 
     public build() {
-        this.dispatch('build');
+        return this.dispatch('build');
     }
 
     public synth() {
-        this.dispatch('synth');
+        return this.dispatch('synth');
     }
 
     public impl() {
@@ -133,11 +133,11 @@ class PlManage extends BaseManage {
     }
 
     public program() {
-        this.dispatch('program');
+        return this.dispatch('program');
     }
 
     public gui() {
-        this.dispatch('gui');
+        return this.dispatch('gui');
     }
 
     public async exit() {

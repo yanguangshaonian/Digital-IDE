@@ -8,6 +8,16 @@ import { PpyAction } from './propery';
 import { IgnoreAction } from './ignore';
 
 class HdlMonitor{
+    private accepting = false;
+    private pending: Promise<void> = Promise.resolve();
+
+    public dispatch(watcher: chokidar.FSWatcher, action: () => Promise<void>) {
+        this.pending = this.pending.then(async () => {
+            if (this.accepting && [this.hdlMonitor, this.ppyMonitor, this.ignoreMonitor].includes(watcher)) {
+                await action();
+            }
+        }).catch(error => MainOutput.report(`文件监视处理失败: ${String(error)}`, { level: ReportType.Error }));
+    }
     private monitorConfig: chokidar.ChokidarOptions;
     public hdlMonitor?: chokidar.FSWatcher;
     public ppyMonitor?: chokidar.FSWatcher;
@@ -70,14 +80,20 @@ class HdlMonitor{
     }
 
     public async close() {
+        this.accepting = false;
         await Promise.all([
             this.hdlMonitor?.close(),
             this.ppyMonitor?.close(),
             this.ignoreMonitor?.close()
         ]);
+        await this.pending;
+        this.hdlMonitor = undefined;
+        this.ppyMonitor = undefined;
+        this.ignoreMonitor = undefined;
     }
 
     public start() {
+        this.accepting = true;
         // make monitor
         this.hdlMonitor = this.getHdlMonitor();
         this.ppyMonitor = this.getPpyMonitor();
