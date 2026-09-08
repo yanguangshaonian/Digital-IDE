@@ -3,6 +3,7 @@
     "Launch the manufacturer Simulation": "启动厂商仿真工具",
     "Launch the manufacturer Simulation in CLI": "以命令行方式启动厂商仿真工具",
     "Launch the manufacturer Simulation in GUI": "以图形界面方式启动厂商仿真工具",
+    "Vivado simulation: export VCD and open in VS Code": "Vivado 仿真：导出 VCD 波形并在 VS Code 中打开",
     "Refresh the current project file": "刷新当前项目文件",
     "Build the current fpga project": "构建当前 FPGA 项目",
     "Synth the current project": "综合当前项目",

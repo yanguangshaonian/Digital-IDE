@@ -81,20 +81,26 @@ export function registerManagerCommands(context: vscode.ExtensionContext) {
 
     // pl toolbox commands (hard tool in treeView)
     registerHardwareCommand('digital-ide.hard.launch', () => plManage.launch());
-    registerHardwareCommand('digital-ide.hard.simulate', () => plManage.simulate());
-    registerHardwareCommand('digital-ide.hard.simulate.cli', () => plManage.simulateCli());
-    registerHardwareCommand('digital-ide.hard.simulate.gui', () => plManage.simulateGui());
+    const requestSimulationDuration = (title: string) => vscode.window.showInputBox({
+        title,
+        prompt: '输入仿真运行时长（ns）；将重新启动当前仿真。',
+        value: '2000',
+        validateInput: value => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? undefined : '请输入正整数纳秒数'
+    });
+    const simulateWithDuration = async (mode: 'simulate' | 'simulateCli' | 'simulateGui') => {
+        const duration = await requestSimulationDuration(mode === 'simulateGui' ? 'Vivado GUI 仿真' : 'Vivado CLI 仿真');
+        if (duration === undefined) { return; }
+        return plManage[mode](Number(duration));
+    };
+    registerHardwareCommand('digital-ide.hard.simulate', () => simulateWithDuration('simulate'));
+    registerHardwareCommand('digital-ide.hard.simulate.cli', () => simulateWithDuration('simulateCli'));
+    registerHardwareCommand('digital-ide.hard.simulate.gui', () => simulateWithDuration('simulateGui'));
     registerHardwareCommand('digital-ide.hard.simulate.vcd', async () => {
         const hardware = prjManage.pl;
         if (!hardware || !(hardware.context.ope instanceof XilinxOperation)) {
             throw new Error('VCD 导出模式目前只支持 Vivado。');
         }
-        const duration = await vscode.window.showInputBox({
-            title: 'Vivado → VCD → VS Code',
-            prompt: '从 0 时刻重新仿真，输入运行时长（ns）；会重置当前仿真。',
-            value: '2000',
-            validateInput: value => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? undefined : '请输入正整数纳秒数'
-        });
+        const duration = await requestSimulationDuration('Vivado → VCD → VS Code');
         if (duration === undefined) { return; }
         const output = await hardware.context.ope.exportVcd(hardware.context, Number(duration));
         await openWaveViewer(context, vscode.Uri.file(output));

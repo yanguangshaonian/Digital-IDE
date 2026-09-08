@@ -58,6 +58,13 @@ class HdlParam {
      */
     public setHdlFile(hdlFile: HdlFile) {
         const path = hdlFile.path;
+        // 重新解析同一路径时，Map 覆盖不会清理以对象身份保存的模块集合。
+        // 必须在新文件注册模块前移除旧模块及实例引用，避免每次仿真累积顶层节点。
+        const previous = this.pathToHdlFiles.get(path);
+        if (previous === hdlFile) { return; }
+        if (previous) {
+            this.deleteHdlFile(path);
+        }
         this.pathToHdlFiles.set(path, hdlFile);
     }
 

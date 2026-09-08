@@ -462,11 +462,6 @@
                 "title": "%digital-ide.soft.download.title%"
             },
             {
-                "command": "digital-ide.hard.launch",
-                "category": "Digital-IDE",
-                "title": "%digital-ide.hard.launch.title%"
-            },
-            {
                 "command": "digital-ide.hard.simulate",
                 "category": "Digital-IDE",
                 "title": "%digital-ide.hard.simulate.title%"

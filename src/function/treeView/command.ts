@@ -88,11 +88,6 @@ class BaseCommandTreeProvider implements vscode.TreeDataProvider<CommandDataItem
 class HardwareTreeProvider extends BaseCommandTreeProvider {
     constructor() {
         const config: CommandConfig = {
-            Launch: {
-                cmd: 'digital-ide.hard.launch',
-                icon: 'cmd',
-                tip: 'Launch FPGA development assist function'
-            },
             Simulate: {
                 cmd: 'digital-ide.hard.simulate',
                 icon: 'toolBox',

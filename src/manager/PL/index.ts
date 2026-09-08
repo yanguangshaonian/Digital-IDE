@@ -77,74 +77,60 @@ class PlManage extends BaseManage {
         }
     }
 
-    private reportMissingSession(action: string) {
-        this.reportSession(action);
-        HardwareOutput.report(`【硬件分发跳过】操作=${action}；当前没有进程句柄，按原有逻辑不执行。请先启动硬件工具并检查启动日志。`, {
-            level: ReportType.Warn
-        });
+    private async dispatchWithSession(action: string, ...args: unknown[]) {
+        if (this.context.ope instanceof XilinxOperation) {
+            await this.context.ope.ensureReady(this.context);
+        } else if (this.context.ope instanceof EfinityOperation && !this.context.ope.prjScript) {
+            await this.dispatch('launch');
+        }
+        return this.dispatch(action, ...args);
     }
 
     public launch() {
         return this.dispatch('launch');
     }
 
-    public simulate() {
-        if (this.context.process === undefined) {
-            this.reportMissingSession('simulate');
-            return;
-        }
-        this.dispatch('simulate');
+    public simulate(durationNs = 2000) {
+        return this.dispatchWithSession('simulate', durationNs);
     }
 
-    public simulateCli() {
-        return this.dispatch('simulateCli');
+    public simulateCli(durationNs = 2000) {
+        return this.dispatchWithSession('simulateCli', durationNs);
     }
 
-    public simulateGui() {
-        return this.dispatch('simulateGui');
+    public simulateGui(durationNs = 2000) {
+        return this.dispatchWithSession('simulateGui', durationNs);
     }
 
     public refresh() {
-        if (this.context.process === undefined) {
-            this.reportMissingSession('refresh');
-            return;
-        }
-        this.dispatch('refresh');
+        return this.dispatchWithSession('refresh');
     }
 
     public build() {
-        return this.dispatch('build');
+        return this.dispatchWithSession('build');
     }
 
     public synth() {
-        return this.dispatch('synth');
+        return this.dispatchWithSession('synth');
     }
 
     public impl() {
-        if (this.context.process === undefined) {
-            this.reportMissingSession('impl');
-            return null;
-        }
-        this.dispatch('impl');
+        return this.dispatchWithSession('impl');
     }
 
     public bitstream() {
-        this.dispatch('generateBit');
+        return this.dispatchWithSession(this.context.ope instanceof EfinityOperation ? 'bitstream' : 'generateBit');
     }
 
     public program() {
-        return this.dispatch('program');
+        return this.dispatchWithSession('program');
     }
 
     public gui() {
-        return this.dispatch('gui');
+        return this.dispatchWithSession('gui');
     }
 
     public async exit() {
-        if (this.context.process === undefined) {
-            this.reportMissingSession('exit');
-            return;
-        }
         HardwareOutput.show();        
         await this.dispatch('exit');
     }

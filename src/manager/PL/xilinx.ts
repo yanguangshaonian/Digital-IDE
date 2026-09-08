@@ -178,29 +178,44 @@ class XilinxOperation {
      * @param context
      */
     public async launch(context: PLContext): Promise<string | undefined> {
-            this.assertWorkspace();
+        this.assertWorkspace();
         if (this.exitPromise) {
             HardwareOutput.report('Vivado 正在退出，请等待退出完成后再启动。', { level: ReportType.Warn });
-            return undefined;
-        }
-        const existing = context.process;
-        if (existing && !existing.killed && existing.exitCode === null && !existing.stdin.destroyed) {
-            HardwareOutput.report(`Vivado 已有活跃会话，跳过重复启动；PID：${existing.pid ?? '未知'}；状态：${this.vivadoState}`, { level: ReportType.Warn });
-            if (this.vivadoState === '失败') {
-                vscode.window.showErrorMessage('Vivado 进程仍在运行，但工程初始化失败。请先对该工作区执行 Exit，修正项目配置后再 Launch。');
-            }
-            context.process = existing;
             return undefined;
         }
         if (this.launchPromise) {
             HardwareOutput.report(`Vivado 正在启动，复用已有启动请求；当前状态：${this.vivadoState}`, { level: ReportType.Warn });
             return this.launchPromise;
         }
+        const existing = context.process;
+        if (existing && !existing.killed && existing.exitCode === null && !existing.stdin.destroyed) {
+            HardwareOutput.report(`Vivado 已有活跃会话，跳过重复启动；PID：${existing.pid ?? '未知'}；状态：${this.vivadoState}`, { level: ReportType.Warn });
+            if (this.vivadoState === '失败') {
+                vscode.window.showErrorMessage('Vivado 进程仍在运行，但工程初始化失败。请先对该工作区执行 Exit，修正项目配置后重试所需操作。');
+            }
+            context.process = existing;
+            return undefined;
+        }
         this.launchPromise = this.launchInternal(context);
         try {
             return await this.launchPromise;
         } finally {
             this.launchPromise = undefined;
+        }
+    }
+
+    public async ensureReady(context: PLContext): Promise<void> {
+        this.assertWorkspace();
+        const isReady = () => {
+            const process = context.process;
+            return !this.exitPromise && this.vivadoState === '就绪' && process &&
+                !process.killed && process.exitCode === null && process.signalCode === null &&
+                !process.stdin.destroyed && process.stdin.writable;
+        };
+        if (isReady()) { return; }
+        await this.launch(context);
+        if (!isReady()) {
+            throw new Error(`Vivado 工程未就绪（${this.vivadoState}），已取消后续操作。请检查启动日志和项目配置；如有失败会话，请 Exit 后重试。`);
         }
     }
 
@@ -261,6 +276,9 @@ class XilinxOperation {
         }
 
         const tclPath = this.scriptPath('launch');
+        // 启动追踪文件留在会话目录；项目 Tcl 仍使用原工作区解析相对路径。
+        const startupDirectory = this.xilinxPath;
+        scripts.unshift(`cd ${quoteTcl(this.sessionWorkspace)}`);
         scripts.push(this.getRefreshXprDesignSourceCommand());
         scripts.push(`file delete -force ${quoteTcl(tclPath)}`);
         // A process banner is not project readiness. Emit a distinct completion/error marker.
@@ -286,7 +304,7 @@ class XilinxOperation {
             }
 
             const vivadoPids = new Set<number>(pids);
-            const vivadoProcess = spawn(cmd, [], { shell: true, stdio: 'pipe', cwd: _this.sessionWorkspace });
+            const vivadoProcess = spawn(cmd, [], { shell: true, stdio: 'pipe', cwd: startupDirectory });
             const stdoutDecoder = createOutputDecoder(outputEncoding);
             const stderrDecoder = createOutputDecoder(outputEncoding);
             vivadoProcess.stdout.once('end', () => {
@@ -299,7 +317,7 @@ class XilinxOperation {
             });
             context.process = vivadoProcess;
             _this.vivadoState = '等待工具输出';
-            HardwareOutput.report(`已请求创建 Vivado 启动进程；Shell PID：${vivadoProcess.pid ?? '尚未分配'}；工作目录：${opeParam.workspacePath}；工程：${_this.diagnosticProjectPath}。尚未确认工程加载成功。`, { level: ReportType.Info });
+            HardwareOutput.report(`已请求创建 Vivado 启动进程；Shell PID：${vivadoProcess.pid ?? '尚未分配'}；启动临时目录：${startupDirectory}；Tcl 项目工作目录：${_this.sessionWorkspace}；工程：${_this.diagnosticProjectPath}。尚未确认工程加载成功。`, { level: ReportType.Info });
             let status: 'pending' | 'fulfilled' = 'pending';
             let startupOutput = '';
 
@@ -626,7 +644,7 @@ class XilinxOperation {
      */
     public refresh(context: PLContext) {
         if (!context.process || context.process.exitCode !== null || context.process.stdin.destroyed) {
-            HardwareOutput.report(`无法同步：没有可用的 Vivado 进程，请先执行 Launch。工程：${this.diagnosticProjectPath || this.prjInfo.path}；PID：${context.process?.pid ?? '无'}；退出码：${context.process?.exitCode ?? '未退出或无进程'}；输入流已销毁：${context.process?.stdin.destroyed ?? '无输入流'}`, { level: ReportType.Error });
+            HardwareOutput.report(`无法同步：没有可用的 Vivado 进程，请检查启动日志后重试。工程：${this.diagnosticProjectPath || this.prjInfo.path}；PID：${context.process?.pid ?? '无'}；退出码：${context.process?.exitCode ?? '未退出或无进程'}；输入流已销毁：${context.process?.stdin.destroyed ?? '无输入流'}`, { level: ReportType.Error });
             return;
         }
         HardwareOutput.report('收到手动刷新请求，准备向 Vivado 发送同步命令。', { level: ReportType.Info });
@@ -666,11 +684,14 @@ class XilinxOperation {
         } finally { this.exitPromise = undefined; }
     }
 
-    public simulate(context: PLContext) {
-        this.simulateCli(context);
+    public simulate(durationNs: number, context: PLContext) {
+        return this.simulateCli(durationNs, context);
     }
 
-    public simulateGui(context: PLContext) {
+    public simulateGui(durationNs: number, context: PLContext) {
+        if (!Number.isSafeInteger(durationNs) || durationNs <= 0) {
+            throw new Error('请输入正整数纳秒数');
+        }
         vscode.window.showInformationMessage(
             "Xilinx：请求 GUI 仿真",
             { title: 'ok', value: true }
@@ -694,7 +715,7 @@ if { [string length $curr_wave] == 0 } {
         send_msg_id Add_Wave-1 WARNING "未找到顶层信号，仿真器将不打开波形窗口。可通过 File->New Waveform Configuration 或 Tcl 命令 create_wave_config 创建波形配置。"
     }
 }
-run 1us
+run ${durationNs} ns
 
 start_gui -quiet
 file delete -force ${quoteTcl(scriptPath)}\n`;
@@ -703,11 +724,14 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         HardwareOutput.report(`GUI 仿真脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = loadTclScript(scriptPath);
         
-        HardwareOutput.report(`GUI 仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 1us。`, { level: ReportType.Info });
+        HardwareOutput.report(`GUI 仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 ${durationNs} ns。`, { level: ReportType.Info });
         this.sendCommand(context, 'GUI 仿真', cmd);
     }
 
-    public simulateCli(context: PLContext) {
+    public simulateCli(durationNs: number, context: PLContext) {
+        if (!Number.isSafeInteger(durationNs) || durationNs <= 0) {
+            throw new Error('请输入正整数纳秒数');
+        }
         vscode.window.showInformationMessage(
             "Xilinx：请求命令行仿真",
             { title: 'ok', value: true }
@@ -730,22 +754,23 @@ if { [string length $curr_wave] == 0 } {
         send_msg_id Add_Wave-1 WARNING "未找到顶层信号，仿真器将不打开波形窗口。可通过 File->New Waveform Configuration 或 Tcl 命令 create_wave_config 创建波形配置。"
     }
 }
-run 1us
+run ${durationNs} ns
 file delete -force ${quoteTcl(scriptPath)}\n`;
 
         const scriptWritten = hdlFile.writeFile(scriptPath, script);
         HardwareOutput.report(`命令行仿真脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = loadTclScript(scriptPath);
 
-        HardwareOutput.report(`命令行仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 1us。`, { level: ReportType.Info });
+        HardwareOutput.report(`命令行仿真脚本：${scriptPath}；仿真顶层：${this.topMod.sim || '未识别'}；计划运行 ${durationNs} ns。`, { level: ReportType.Info });
         this.sendCommand(context, '命令行仿真', cmd);
     }
 
     public async exportVcd(context: PLContext, durationNs: number): Promise<string> {
         this.assertWorkspace();
+        await this.ensureReady(context);
         const process = context.process;
         if (!process || this.vivadoState !== '就绪') {
-            throw new Error('请先 Launch 当前工作区的 Vivado 工程并等待就绪。');
+            throw new Error('当前工作区的 Vivado 工程尚未就绪，已取消 VCD 导出。');
         }
         const outputDirectory = hdlPath.join(this.prjPath, 'vivado');
         fs.mkdirSync(outputDirectory, { recursive: true });
