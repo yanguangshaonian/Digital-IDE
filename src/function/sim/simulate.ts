@@ -1,3 +1,5 @@
+import { collectIncludeDirectories } from './includePaths';
+import { prepareAutoWave } from './autoWave';
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as fspath from 'path';
@@ -311,21 +313,27 @@ export class IcarusSimulate extends Simulate {
         const extaArgs = args.join(' ');
         let command = `${iverilogPath} ${argu}`;
 
-        // const parent = fspath.dirname(path);
-        if (alldeps.length) {            
-            command += ' ' + '-I';
-            for (let index = 0; index < alldeps.length; index++) {
-                const element = alldeps[index];
-                command += ' ' + '"' + hdlPath.resolve(element, '..') + '"'; 
-            }
+        const includeDirectories = collectIncludeDirectories(
+            [path, ...otherdeps, ...alldeps, ...simLibPaths.filter(file => !hdlFile.isDir(file))],
+            iverilogCompileOptions.includes.filter(directory => hdlFile.isDir(directory))
+        );
+        for (const directory of includeDirectories) {
+            command += ' -I ' + makeSafeArgPath(directory);
         }
 
         command += ' ' + `-o ${outVvpPath} -s ${name}`;
 
+        const autoWave = prepareAutoWave(name, [path, ...otherdeps, ...alldeps], simConfig.simulationHome);
+        if (autoWave) {
+            command += ` -s ${autoWave.name}`;
+            MainOutput.report('已自动启用 VCD 波形导出, 无需修改 testbench.');
+        }
         if (extaArgs) {
             command += ' ' + extaArgs;
         }
-
+        if (autoWave) {
+            command += ' ' + makeSafeArgPath(hdlPath.toSlash(autoWave.file));
+        }
         return command;
     }
 
@@ -425,6 +433,17 @@ export class IcarusSimulate extends Simulate {
             // 对于 vvp 的输出结果，特殊处理
             try {
                 this.handleVvpStdOutput(stdout, command, cwd);
+                if (stderr.trim()) {
+                    MainOutput.report(stderr.trim(), { level: ReportType.Warn });
+                }
+                MainOutput.report('Icarus 仿真进程已结束 (退出码 0).', { level: ReportType.Finish });
+                if (!/VCD info:.*dumpfile .+ opened for output/.test(stdout) &&
+                    !/(?:ERROR:|VCD Error:)/.test(stdout)) {
+                    MainOutput.report('未检测到 VCD 波形输出. 如需查看波形, 请在 testbench 中添加 $dumpfile("wave.vcd") 和 $dumpvars(0, 顶层模块名). 仿真事件执行完毕后会自动结束, 不代表启动失败.', {
+                        level: ReportType.Warn,
+                        notify: true
+                    });
+                }
                 resolve();
             } catch (failure) { reject(failure); }
         }));

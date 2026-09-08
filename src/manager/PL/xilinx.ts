@@ -16,7 +16,7 @@ import { debounce, getPIDsWithName } from '../../global/util';
 import { t } from '../../i18n';
 import { HdlFileProjectType } from '../../hdlParser/common';
 import { encodeTclScript, loadTclScript, quoteTcl } from './tcl';
-import { makeVivadoVcdScript } from './vcd';
+import { makeVivadoVcdName, makeVivadoVcdScript } from './vcd';
 
 interface XilinxCustom {
     ipRepo: AbsPath, 
@@ -775,8 +775,12 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         const outputDirectory = hdlPath.join(this.prjPath, 'vivado');
         fs.mkdirSync(outputDirectory, { recursive: true });
         const token = `${Date.now()}_${++this.scriptSequence}`;
-        const name = (this.topMod.sim || 'simulation').replace(/[^a-zA-Z0-9_-]/g, '_');
-        const outputPath = hdlPath.join(outputDirectory, `${name}_${token}.vcd`);
+        const name = makeVivadoVcdName(this.topMod.sim);
+        let outputPath = hdlPath.join(outputDirectory, `${name}.vcd`);
+        let suffix = 1;
+        while (fs.existsSync(outputPath)) {
+            outputPath = hdlPath.join(outputDirectory, `${name}_${suffix++}.vcd`);
+        }
         const scriptPath = this.scriptPath('export-vcd');
         fs.writeFileSync(scriptPath, encodeTclScript(makeVivadoVcdScript(outputPath, durationNs, token)), 'utf8');
         await new Promise<void>((resolve, reject) => {
@@ -867,13 +871,15 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         script += `reset_run synth_1 ${quietArg}\n`;
         script += `launch_runs synth_1 ${quietArg} -jobs 4\n`;
         script += `wait_on_run synth_1 ${quietArg}\n`;
+        script += 'if {[get_property STATUS [get_runs synth_1]] ne "synth_design Complete!"} {error "Synthesis failed; full build stopped"}\n';
         script += `reset_run impl_1 ${quietArg}\n`;
         script += `launch_runs impl_1 ${quietArg} -jobs 4\n`;
         script += `wait_on_run impl_1 ${quietArg}\n`;
+        script += 'if {[get_property STATUS [get_runs impl_1]] ne "route_design Complete!"} {error "Implementation failed; full build stopped"}\n';
         script += `open_run impl_1 ${quietArg}\n`;
         script += `report_timing_summary ${quietArg}\n`;
 
-        this.generateBit(context);
+        script += this.getBitstreamCommands();
 
         const scriptPath = this.scriptPath('build');
 
@@ -882,16 +888,11 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         HardwareOutput.report(`构建脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = loadTclScript(scriptPath);
 
-        HardwareOutput.report(`构建脚本：${scriptPath}\n计划命令：\n${script}\n沿用现有调用顺序：生成 bit 请求先于构建脚本发送；本日志不确认构建结果。`, { level: ReportType.Info });
+        HardwareOutput.report(`完整构建脚本: ${scriptPath}\n计划命令:\n${script}\n执行顺序: 综合 -> 实现 -> 生成 bit. 任一步失败将停止当前脚本.`, { level: ReportType.Info });
         this.sendCommand(context, '构建', cmd);
     }
 
-    generateBit(context: PLContext) {
-        vscode.window.showInformationMessage(
-            "Xilinx：请求生成 bit",
-            { title: 'ok', value: true }
-        );
-
+    private getBitstreamCommands(): string {
         let scripts: string[] = [];
         let core = this.prjConfig.soc.core;
         let sysdefPath = `${this.prjInfo.path}/${this.prjInfo.name}.runs` + 
@@ -909,18 +910,22 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
             scripts.push(`write_bitstream ./[current_project].bit -force -quiet -bin_file`);
         }
 
-        let script = '';
-        for (let i = 0; i < scripts.length; i++) {
-            const content = scripts[i];
-            script += content + '\n';
-        }
+        return scripts.join('\n') + '\n';
+    }
+
+    generateBit(context: PLContext) {
+        vscode.window.showInformationMessage(
+            'Xilinx: 请求生成 bit',
+            { title: 'ok', value: true }
+        );
+        let script = this.getBitstreamCommands();
         let scriptPath = this.scriptPath('bit');
         script += `file delete -force ${quoteTcl(scriptPath)}\n`;
         const scriptWritten = hdlFile.writeFile(scriptPath, script);
         HardwareOutput.report(`bit 脚本写入${scriptWritten ? '完成' : '失败'}：${scriptPath}`, { level: scriptWritten ? ReportType.Info : ReportType.Error });
         const cmd = loadTclScript(scriptPath);
 
-        HardwareOutput.report(`生成 bit 脚本：${scriptPath}；SoC 核：${core || '未配置'}\n计划命令：\n${script}\nbit 输出路径相对于 Vivado 当前工作目录，不保证等同于工程目录。`, { level: ReportType.Info });
+        HardwareOutput.report(`生成 bit 脚本: ${scriptPath}; SoC 核: ${this.prjConfig.soc.core || '未配置'}\n计划命令:\n${script}\nbit 输出路径相对于 Vivado 当前工作目录, 不保证等同于工程目录.`, { level: ReportType.Info });
         this.sendCommand(context, '生成 bit', cmd);
     }
 

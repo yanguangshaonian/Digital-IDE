@@ -20,7 +20,7 @@
     "digital-ide.hard.simulate.cli.title": "在 CLI 中启动厂商仿真",
     "digital-ide.hard.simulate.gui.title": "在 GUI 中启动厂商仿真",
     "digital-ide.hard.refresh.title": "刷新当前项目文件",
-    "digital-ide.hard.build.title": "构建当前 FPGA 项目",
+    "digital-ide.hard.build.title": "完整构建 FPGA (综合 + 实现 + 生成 Bitstream)",
     "digital-ide.hard.build.synth.title": "综合当前项目",
     "digital-ide.hard.build.impl.title": "实现当前项目",
     "digital-ide.hard.build.bitstream.title": "生成 BIT 文件",

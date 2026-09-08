@@ -674,6 +674,11 @@
                 "title": "%digital-ide.structure.from-xilinx-to-standard.title%"
             }
         ],
+        "submenus": [
+            { "id": "digital-ide.context", "label": "Digital-IDE" },
+            { "id": "digital-ide.context.simulate", "label": "Simulate" },
+            { "id": "digital-ide.context.build", "label": "Build" }
+        ],
         "menus": {
             "view/title": [
                 {
@@ -765,22 +770,52 @@
             ],
             "editor/context": [
                 {
-                    "when": "editorLangId == verilog || editorLangId == systemverilog || editorLangId == vhdl",
-                    "command": "digital-ide.tool.instance",
-                    "group": "navigation@3"
-                },
-                {
-                    "when": "resourceLangId == vhdl",
-                    "command": "digital-ide.vhdl2vlog",
-                    "group": "navigation@9"
-                },
-                {
-                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
-                    "command": "digital-ide.hdlDoc.exportFile",
-                    "group": "navigation@10"
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl || resourceLangId == vcd || resourceLangId == view",
+                    "submenu": "digital-ide.context",
+                    "group": "z_digital_ide@100"
                 }
             ],
             "explorer/context": [
+                {
+                    "when": "explorerResourceIsFolder || resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl || resourceLangId == vcd || resourceLangId == view",
+                    "submenu": "digital-ide.context",
+                    "group": "z_digital_ide@100"
+                }
+            ],
+            "digital-ide.context": [
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "submenu": "digital-ide.context.simulate",
+                    "group": "1_hardware@1"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.hard.refresh", "group": "1_hardware@2"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "submenu": "digital-ide.context.build", "group": "1_hardware@3"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.hard.program", "group": "1_hardware@4"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.hard.gui", "group": "1_hardware@5"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.hard.exit", "group": "1_hardware@6"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.tool.icarus.simulateFile", "group": "2_module@1"
+                },
+                {
+                    "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
+                    "command": "digital-ide.pickLibrary", "group": "3_library@1"
+                },
                 {
                     "when": "explorerResourceIsFolder",
                     "command": "digital-ide.property-json.generate",
@@ -789,33 +824,44 @@
                 {
                     "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
                     "command": "digital-ide.pl.setSrcTop",
-                    "group": "navigation@5"
+                    "group": "2_module@2"
                 },
                 {
                     "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
                     "command": "digital-ide.pl.setSimTop",
-                    "group": "navigation@6"
+                    "group": "2_module@3"
                 },
                 {
                     "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
                     "command": "digital-ide.tool.instance",
-                    "group": "navigation@8"
+                    "group": "2_module@4"
                 },
                 {
                     "when": "resourceLangId == vcd || resourceLangId == view",
                     "command": "digital-ide.waveviewer.show",
-                    "group": "navigation@10"
+                    "group": "4_tools@1"
                 },
                 {
                     "when": "resourceLangId == vhdl",
                     "command": "digital-ide.vhdl2vlog",
-                    "group": "navigation@12"
+                    "group": "4_tools@2"
                 },
                 {
                     "when": "resourceLangId == verilog || resourceLangId == systemverilog || resourceLangId == vhdl",
                     "command": "digital-ide.hdlDoc.exportFile",
-                    "group": "navigation@13"
+                    "group": "4_tools@3"
                 }
+            ],
+            "digital-ide.context.simulate": [
+                { "command": "digital-ide.hard.simulate.cli", "group": "1_simulate@2" },
+                { "command": "digital-ide.hard.simulate.gui", "group": "1_simulate@3" },
+                { "command": "digital-ide.hard.simulate.vcd", "group": "1_simulate@4" }
+            ],
+            "digital-ide.context.build": [
+                { "command": "digital-ide.hard.build", "group": "1_build@1" },
+                { "command": "digital-ide.hard.build.synth", "group": "1_build@2" },
+                { "command": "digital-ide.hard.build.impl", "group": "1_build@3" },
+                { "command": "digital-ide.hard.build.bitstream", "group": "1_build@4" }
             ]
         },
         "customEditors": [
