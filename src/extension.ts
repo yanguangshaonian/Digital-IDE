@@ -13,6 +13,7 @@ import { refreshArchTree } from './function/treeView';
 import { moduleTreeProvider } from './function/treeView/tree';
 import { initialiseI18n, t } from './i18n';
 import { configureWorkspaceContext, followEditorWorkspace, failWorkspaceContext, stopWorkspaceContext, enqueueWorkspaceCleanup } from './manager/workspaceContext';
+import { findProjectProperty, projectKey, projectRoot } from './manager/projectLocator';
 
 
 async function registerCommand(context: vscode.ExtensionContext, packageJson: any) {
@@ -78,8 +79,11 @@ async function launch(context: vscode.ExtensionContext) {
     globalLookup.activeEditor = vscode.window.activeTextEditor;
     let initialized = false;
     let preparedWorkspace = '';
-    const prepareWorkspace = async (folder: vscode.WorkspaceFolder) => {
-            if (folder.uri.toString() === preparedWorkspace) {
+            const prepareWorkspace = async (folder: vscode.WorkspaceFolder, sourceUri?: vscode.Uri) => {
+                const located = sourceUri && findProjectProperty(sourceUri);
+                const targetRoot = located?.root || folder.uri;
+                const targetKey = projectKey(sourceUri || targetRoot) || targetRoot.toString();
+                if (targetKey === preparedWorkspace) {
                 return;
             }
             preparedWorkspace = '';
@@ -88,7 +92,7 @@ async function launch(context: vscode.ExtensionContext) {
             hdlParam.clear();
             opeParam.resetProjectInfo();
             moduleTreeProvider.resetTopSelection();
-            const config = await manager.prjManage.initOpeParam(context, folder);
+            const config = await manager.prjManage.initOpeParam(context, { ...folder, uri: targetRoot });
             await manager.prjManage.refreshPrjFolder(config);
             await lspClient.activate(context, packageJson);
             const files = await manager.prjManage.initialise(context, {
@@ -99,13 +103,14 @@ async function launch(context: vscode.ExtensionContext) {
             await lspLinter.initialise(context, files, {
                 report() { /* progress is optional during automatic switching */ }
             } as vscode.Progress<IProgress>);
-            preparedWorkspace = folder.uri.toString();
+            preparedWorkspace = targetKey;
     };
     const switchToEditorWorkspace = (editor?: vscode.TextEditor) => {
         if (!editor || !vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
             return Promise.resolve();
         }
-        return followEditorWorkspace(editor.document.uri).catch(error => {
+        const located = findProjectProperty(editor.document.uri);
+        return followEditorWorkspace(located?.property || editor.document.uri).catch(error => {
             vscode.window.showErrorMessage(`Digital-IDE 工作区切换失败: ${String(error)}`);
         });
     };
@@ -142,7 +147,9 @@ async function launch(context: vscode.ExtensionContext) {
     }, async () => {
         // 初始化 OpeParam
         // 包含基本的插件的文件系统信息、用户配置文件和系统配置文件的合并数据结构
-        const folder = vscode.window.activeTextEditor && vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri);
+        const activeUri = vscode.window.activeTextEditor?.document.uri;
+        const located = activeUri && findProjectProperty(activeUri);
+        const folder = activeUri && vscode.workspace.getWorkspaceFolder(located?.property || activeUri);
         const refreshPrjConfig = await manager.prjManage.initOpeParam(context, folder);
         await manager.prjManage.refreshPrjFolder(refreshPrjConfig);
     });
@@ -183,7 +190,7 @@ async function launch(context: vscode.ExtensionContext) {
     });
 
     initialized = true;
-    preparedWorkspace = vscode.Uri.file(opeParam.workspacePath).toString();
+    preparedWorkspace = projectKey(vscode.Uri.file(opeParam.propertyJsonPath)) || vscode.Uri.file(opeParam.workspacePath).toString();
     configureWorkspaceContext(prepareWorkspace);
     await switchToEditorWorkspace(vscode.window.activeTextEditor);
     console.log(hdlParam);

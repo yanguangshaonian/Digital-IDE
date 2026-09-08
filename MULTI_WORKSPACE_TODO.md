@@ -10,6 +10,15 @@
 - 修改代码后执行编译、回归测试、打包并核验 VSIX 内容及更新时间。
 - 未经明确要求，不启动或关闭用户真实 Vivado 会话；不自动提交或推送。
 
+## 多项目 property.json 设计
+
+- 项目身份使用最近祖先 `.vscode/property.json` 的规范化 URI，而不是仅使用 VS Code workspace 根目录。
+- 同一 `property.json` 下的文件必须复用同一项目上下文，不重复创建解析器、监视器、LSP 或 Vivado 管理器。
+- 查找边界是当前 VS Code workspace 根；不会越过 workspace 读取外部目录的配置。
+- 资源管理器右键创建时，目标是实际选中的文件夹；选中文件时目标为文件所在文件夹，不回退到 workspace 根。
+- 当前批次已加入查找和创建路径代码，但 LSP/硬件会话按 property URI 的完整去重尚未完成，需单独测试后再标记完成。
+- 当前批次已完成 projectKey 去重：不同文件向上找到同一 property.json 时复用项目准备队列；test-project-locator.cjs 已通过。实际多项目宿主集成仍需验证。
+
 ## 待办
 
 - [x] 01【已解决】按 workspace URI 保存硬件管理器，切换编辑器不退出旧会话；Xilinx 核心路径和顶层绑定管理器所属配置。返回该工作区重新绑定配置；停用遍历受管会话。独立会话测试通过，真实 Vivado 并行集成尚未执行。

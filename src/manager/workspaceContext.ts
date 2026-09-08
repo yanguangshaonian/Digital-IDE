@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
+import { projectKey, projectRoot } from './projectLocator';
 
-let prepare: (folder: vscode.WorkspaceFolder) => Promise<void>;
+let prepare: (folder: vscode.WorkspaceFolder, uri?: vscode.Uri) => Promise<void>;
 let readyResolve: () => void;
 let readyReject: (error: unknown) => void;
 const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
@@ -8,6 +9,7 @@ void ready.catch(() => undefined);
 let queue: Promise<unknown> = Promise.resolve();
 let stopped = false;
 let editorGeneration = 0;
+let preparedProjectKey = '';
 
 export function failWorkspaceContext(error: unknown) {
     readyReject(error);
@@ -45,7 +47,12 @@ export function runInWorkspace<T>(uri: vscode.Uri, action: () => Promise<T>, cur
         if (!vscode.workspace.workspaceFolders?.some(item => item.uri.toString() === folder.uri.toString())) {
             throw new Error('目标工作区已移除');
         }
-        await prepare(folder);
+        const key = projectKey(uri) || projectRoot(uri).toString();
+        if (key === preparedProjectKey) {
+            return action();
+        }
+        await prepare(folder, uri);
+        preparedProjectKey = key;
         return action();
     });
     queue = operation.catch(() => undefined);

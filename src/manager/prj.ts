@@ -17,6 +17,7 @@ import { t } from '../i18n';
 import { PpyAction } from '../monitor/propery';
 import { checkJson, readJSON, writeJSON } from '../hdlFs/file';
 import { PropertySchema } from '../global/propertySchema';
+import { findProjectProperty } from './projectLocator';
 
 interface RefreshPrjConfig {
     mkdir: boolean
@@ -51,7 +52,12 @@ class PrjManage {
      * @returns 
      */
     public async generatePropertyJson(context: vscode.ExtensionContext, resource?: vscode.Uri) {
-        let targetFolder = resource && vscode.workspace.getWorkspaceFolder(resource);
+        let targetRoot = resource && vscode.workspace.getWorkspaceFolder(resource)?.uri;
+        if (resource?.scheme === 'file') {
+            const stat = fs.existsSync(resource.fsPath) ? fs.statSync(resource.fsPath) : undefined;
+            targetRoot = vscode.Uri.file(stat?.isDirectory() ? resource.fsPath : fspath.dirname(resource.fsPath));
+        }
+        let targetFolder = targetRoot && vscode.workspace.getWorkspaceFolder(targetRoot);
         if (!targetFolder) {
             const folders = vscode.workspace.workspaceFolders || [];
             if (folders.length === 1) {
@@ -65,7 +71,8 @@ class PrjManage {
         if (!targetFolder) {
             return;
         }
-        const targetPath = hdlPath.join(targetFolder.uri.fsPath, '.vscode', 'property.json');
+        const actualRoot = targetRoot?.fsPath || targetFolder.uri.fsPath;
+        const targetPath = hdlPath.join(actualRoot, '.vscode', 'property.json');
         if (fs.existsSync(targetPath)) {
             vscode.window.showWarningMessage(`属性文件已存在: ${targetPath}`);
             return;
