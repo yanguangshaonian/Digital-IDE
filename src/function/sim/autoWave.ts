@@ -3,7 +3,10 @@ import * as path from 'path';
 import { randomBytes } from 'crypto';
 
 /** An extra simulation root records the selected top without editing user HDL. */
-export function prepareAutoWave(top: string, files: string[], outputDirectory: string): { name: string; file: string } | undefined {
+export function prepareAutoWave(top: string, files: string[], outputDirectory: string, durationNs?: number): { name: string; file: string } | undefined {
+    if (durationNs !== undefined && (!Number.isSafeInteger(durationNs) || durationNs <= 0)) {
+        throw new Error('Invalid simulation duration in ns');
+    }
     const visited = new Set<string>();
     const hasDump = (file: string): boolean => {
         file = path.resolve(file);
@@ -18,7 +21,8 @@ export function prepareAutoWave(top: string, files: string[], outputDirectory: s
         }
         return false;
     };
-    if (files.some(hasDump)) { return undefined; }
+    const explicitDump = files.some(hasDump);
+    if (explicitDump && durationNs === undefined) { return undefined; }
     if (!/^[a-zA-Z_][a-zA-Z0-9_$]*$/.test(top)) {
         throw new Error('Automatic waveform export requires a simple Verilog top module name.');
     }
@@ -28,6 +32,8 @@ export function prepareAutoWave(top: string, files: string[], outputDirectory: s
     // Use an ASCII basename; the existing collector archives it after simulation.
     // Some Windows Icarus builds cannot open UTF-8 absolute paths from HDL strings.
     const wave = `${top}.vcd`;
-    fs.writeFileSync(file, `module ${name};\ninitial begin\n  $dumpfile(${JSON.stringify(wave)});\n  $dumpvars(0, ${top});\nend\nendmodule\n`);
+    const recording = explicitDump ? '' : `initial begin\n  $dumpfile(${JSON.stringify(wave)});\n  $dumpvars(0, ${top});\nend\n`;
+    const timer = durationNs === undefined ? '' : `initial begin\n  #(${durationNs});\n  $display("DIDE_ICARUS_DURATION_REACHED ${durationNs} ns");\n  $finish;\nend\n`;
+    fs.writeFileSync(file, `${durationNs === undefined ? '' : '\u0060timescale 1ns/1ps\n'}module ${name};\n${recording}${timer}endmodule\n`);
     return { name, file };
 }

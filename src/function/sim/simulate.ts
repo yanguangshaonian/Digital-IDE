@@ -172,6 +172,7 @@ export class IcarusSimulate extends Simulate {
     toolChain: ToolChainType;
     context: vscode.ExtensionContext;
     simConfig: SimulateConfig | undefined;
+    private durationNs?: number;
 
     constructor(context: vscode.ExtensionContext) {
         super();
@@ -323,10 +324,12 @@ export class IcarusSimulate extends Simulate {
 
         command += ' ' + `-o ${outVvpPath} -s ${name}`;
 
-        const autoWave = prepareAutoWave(name, [path, ...otherdeps, ...alldeps], simConfig.simulationHome);
+        const autoWave = prepareAutoWave(name, [path, ...otherdeps, ...alldeps], simConfig.simulationHome, this.durationNs);
         if (autoWave) {
             command += ` -s ${autoWave.name}`;
-            MainOutput.report('已自动启用 VCD 波形导出, 无需修改 testbench.');
+            MainOutput.report(this.durationNs === undefined
+                ? '已自动启用 VCD 波形导出, 无需修改 testbench.'
+                : `已限制 Icarus 最长仿真时间 ${this.durationNs} ns.`);
         }
         if (extaArgs) {
             command += ' ' + extaArgs;
@@ -607,7 +610,11 @@ export class IcarusSimulate extends Simulate {
         }
     }
 
-    public async simulateFile(view: ModuleDataItem) {
+    public async simulateFile(view: ModuleDataItem, durationNs?: number) {
+        if (durationNs !== undefined && (!Number.isSafeInteger(durationNs) || durationNs <= 0)) {
+            throw new Error('请输入正整数纳秒数');
+        }
+        this.durationNs = durationNs;
         // 仿真前重新解析当前项目，避免文件重命名/保存后的旧实例依赖遗漏设计源。
         const files = await prjManage.getPrjHardwareFiles();
         for (const file of hdlParam.getAllHdlFiles()) {

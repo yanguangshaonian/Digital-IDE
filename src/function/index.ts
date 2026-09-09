@@ -72,13 +72,20 @@ function registerSimulation(context: vscode.ExtensionContext) {
                 name: resource && !(resource instanceof vscode.Uri) ? resource.name : undefined
             } as ModuleDataItem;
             try {
+                const duration = await vscode.window.showInputBox({
+                    title: 'Icarus Verilog 仿真',
+                    prompt: '输入仿真运行时长 (ns). 到达指定时间自动结束; 源码中的 $finish 可提前结束.',
+                    value: '2000',
+                    validateInput: value => /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value)) ? undefined : '请输入正整数纳秒数'
+                });
+                if (duration === undefined) { return; }
                 return await runInWorkspace(uri, async () => {
                     const document = vscode.workspace.textDocuments.find(doc => doc.uri.toString() === uri.toString());
                     if (document?.isDirty && !await document.save()) {
                         throw new Error('仿真文件保存失败，已取消仿真。');
                     }
                     const icarus = new sim.IcarusSimulate(context);
-                    return icarus.simulateFile(view);
+                    return icarus.simulateFile(view, Number(duration));
                 });
             } catch (error) {
                 vscode.window.showErrorMessage(`Icarus 仿真失败: ${String(error)}`);

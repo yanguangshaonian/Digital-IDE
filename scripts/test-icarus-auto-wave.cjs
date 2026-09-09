@@ -34,5 +34,27 @@ try {
     }
     fs.writeFileSync(source, 'module tb; initial $dumpvars(0, tb); endmodule');
     assert.equal(exportsObject.prepareAutoWave('tb', [source], temp), undefined);
-    console.log('PASS: automatic VCD helper, source unchanged, real Icarus waveform, existing dump respected');
+    for (const explicit of [false, true]) {
+        fs.writeFileSync(source, '`timescale 1ns/1ps\nmodule tb; reg clk=0; always #1 clk=~clk; ' +
+            (explicit ? 'initial begin $dumpfile("custom.vcd"); $dumpvars(0,tb); end ' : '') + 'endmodule');
+        const timed = exportsObject.prepareAutoWave('tb', [source], temp, 25);
+        const helperText = fs.readFileSync(timed.file, 'utf8');
+        assert.equal(helperText.includes('$dumpfile'), !explicit);
+        if (compiler && runtime) {
+            const compiled = spawnSync(compiler, ['-g2012', '-s', 'tb', '-s', timed.name, '-o', 'timed.vvp', source, timed.file], { cwd: temp, encoding: 'utf8' });
+            assert.equal(compiled.status, 0, compiled.stderr);
+            const simulated = spawnSync(runtime, ['timed.vvp'], { cwd: temp, encoding: 'utf8', timeout: 10000 });
+            assert.equal(simulated.status, 0, simulated.error?.message || simulated.stderr);
+            assert(simulated.stdout.includes('DIDE_ICARUS_DURATION_REACHED 25 ns'));
+            const wave = fs.readFileSync(path.join(temp, explicit ? 'custom.vcd' : 'tb.vcd'), 'utf8');
+            assert.equal([...wave.matchAll(/^#(\d+)/gm)].pop()[1], '25000');
+        }
+    }
+    for (const invalid of [0, -1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+        assert.throws(() => exportsObject.prepareAutoWave('tb', [source], temp, invalid), /Invalid simulation duration/);
+    }
+    const index = fs.readFileSync('src/function/index.ts', 'utf8');
+    assert(index.includes("title: 'Icarus Verilog 仿真'"));
+    assert(index.includes('if (duration === undefined) { return; }'));
+    console.log('PASS: automatic VCD helper, bounded Icarus runtime, explicit dump preserved, invalid duration rejected');
 } finally { fs.rmSync(temp, { recursive: true, force: true }); }
