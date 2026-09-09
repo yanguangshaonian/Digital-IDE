@@ -16,7 +16,7 @@ import { defaultMacro, doFastApi } from '../../hdlParser/util';
 import { t } from '../../i18n';
 import { openWaveViewer } from '../dide-viewer';
 import { HdlDependence } from '../../hdlParser/common';
-import { collectWaveOutput, resetWaveFiles, uniquifyVcdAliases } from './waveOutput';
+import { collectWaveOutput, resetWaveFiles } from './waveOutput';
 import { prjManage } from '../../manager/prj';
 
 type Path = string;
@@ -173,6 +173,7 @@ export class IcarusSimulate extends Simulate {
     context: vscode.ExtensionContext;
     simConfig: SimulateConfig | undefined;
     private durationNs?: number;
+    private waveSources: string[] = [];
 
     constructor(context: vscode.ExtensionContext) {
         super();
@@ -323,12 +324,13 @@ export class IcarusSimulate extends Simulate {
         }
 
         command += ' ' + `-o ${outVvpPath} -s ${name}`;
+        this.waveSources = [path, ...otherdeps, ...alldeps];
         resetWaveFiles(
             hdlPath.join(simConfig.simulationHome, `${name}.vcd`),
             hdlPath.join(opeParam.workspacePath, `${name}.vcd`)
         );
 
-        const autoWave = prepareAutoWave(name, [path, ...otherdeps, ...alldeps], simConfig.simulationHome, this.durationNs);
+        const autoWave = prepareAutoWave(name, this.waveSources, simConfig.simulationHome, this.durationNs);
         if (autoWave) {
             command += ` -s ${autoWave.name}`;
             MainOutput.report(this.durationNs === undefined
@@ -482,12 +484,11 @@ export class IcarusSimulate extends Simulate {
                     let absVcdPath = hdlPath.resolve(cwd, vcdPath);
                     if (this.simConfig) {
                         try {
-                            absVcdPath = collectWaveOutput(cwd, vcdPath, this.simConfig.simulationHome);
+                            absVcdPath = collectWaveOutput(cwd, vcdPath, this.simConfig.simulationHome, this.waveSources);
                         } catch (error) {
                             MainOutput.report(`波形归档失败，保留原路径打开：${String(error)}`, { level: ReportType.Warn });
                         }
                     }
-                    uniquifyVcdAliases(absVcdPath);
                     MainOutput.report(t('info.simulate.vvp.vcd-generate', absVcdPath), { level: ReportType.Finish });
                     if (fs.existsSync(absVcdPath)) {
                         openWaveViewer(this.context, vscode.Uri.file(absVcdPath));

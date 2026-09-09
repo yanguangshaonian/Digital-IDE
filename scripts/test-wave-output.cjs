@@ -15,8 +15,9 @@ function load(file, deps) {
     return exports;
 }
 const cache = load('src/function/dide-viewer/waveCache.ts', { path });
+const structs = load('src/function/sim/waveStructs.ts', { fs, path });
 const { collectWaveOutput, resetWaveFiles, uniquifyVcdAliases } = load('src/function/sim/waveOutput.ts', {
-    fs, path, '../dide-viewer/waveCache': cache
+    fs, path, '../dide-viewer/waveCache': cache, './waveStructs': structs
 });
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dide-wave-'));
 try {

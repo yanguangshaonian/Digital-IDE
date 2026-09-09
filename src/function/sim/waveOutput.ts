@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { forgetWaveLayout } from '../dide-viewer/waveCache';
+import { expandPackedStructVcd } from './waveStructs';
 
 export function resetWaveFiles(...files: string[]) {
     for (const file of files) {
@@ -84,11 +85,17 @@ export function uniquifyVcdAliases(file: string): string {
     return file;
 }
 
+export function prepareVcdDocument(file: string, sources: string[] = []): string {
+    uniquifyVcdAliases(file);
+    expandPackedStructVcd(file, sources);
+    return file;
+}
+
 /** Archive only bare relative dump names; explicit user paths remain untouched. */
-export function collectWaveOutput(cwd: string, dumpName: string, outputDir: string): string {
+export function collectWaveOutput(cwd: string, dumpName: string, outputDir: string, sources: string[] = []): string {
     const source = path.resolve(cwd, dumpName);
     if (path.isAbsolute(dumpName) || /[\\/]/.test(dumpName) || !fs.existsSync(source)) {
-        uniquifyVcdAliases(source);
+        prepareVcdDocument(source, sources);
         return source;
     }
     const target = path.resolve(outputDir, dumpName);
@@ -98,6 +105,6 @@ export function collectWaveOutput(cwd: string, dumpName: string, outputDir: stri
         fs.copyFileSync(source, target);
         fs.unlinkSync(source);
     }
-    uniquifyVcdAliases(target);
+    prepareVcdDocument(target, sources);
     return target;
 }

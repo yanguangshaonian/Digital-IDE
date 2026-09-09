@@ -5,7 +5,8 @@ import * as fs from 'fs';
 import { hdlFile, hdlPath } from '../../hdlFs';
 import { opeParam, ReportType, WaveViewOutput } from '../../global';
 import { LaunchFiles, loadView, saveView, saveViewAs } from './api';
-import { uniquifyVcdAliases } from '../sim/waveOutput';
+import { prepareVcdDocument } from '../sim/waveOutput';
+import { collectHdlSources } from '../sim/waveStructs';
 import { forgetWaveLayout } from './waveCache';
 import { BSON } from 'bson';
 import { getIconConfig } from '../../hdlFs/icons';
@@ -14,7 +15,10 @@ import { t } from '../../i18n';
 function prepareWaveDocument(entryPath: string) {
     const vcd = entryPath.replace(/\.view$/i, '.vcd');
     const view = vcd.replace(/\.vcd$/i, '.view');
-    if (fs.existsSync(vcd)) { uniquifyVcdAliases(vcd); }
+    if (fs.existsSync(vcd)) {
+        const roots = [opeParam.workspacePath, opeParam.prjInfo.arch.hardware.src, opeParam.prjInfo.arch.hardware.sim].filter(Boolean);
+        prepareVcdDocument(vcd, collectHdlSources(roots));
+    }
     // Simulation and VCD open always drop sibling layout so stale alias IDs
     // cannot leave undeletable empty traces. Opening a .view file keeps it.
     if (!entryPath.toLowerCase().endsWith('.view')) {
