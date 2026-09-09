@@ -12,7 +12,8 @@ const opeParam = { openMode: 'folder', workspacePath: 'A' };
 const Subject = vm.runInNewContext(ts.transpileModule(`class Subject { ${methods} }; Subject`, {
     compilerOptions: { target: ts.ScriptTarget.ES2020 }
 }).outputText, { opeParam, child_process: { exec(command, options, callback) { callbacks.push({ command, options, callback }); } },
-    MainOutput: { report() {} }, hdlPath: { join: path.posix.join }, makeSafeArgPath: x => `"${x}"` });
+    MainOutput: { report() {} }, ReportType: { Warn: 'Warn', Finish: 'Finish' },
+    hdlPath: { join: path.posix.join }, makeSafeArgPath: x => `"${x}"` });
 (async () => {
     const subject = new Subject();
     subject.reportCommandError = () => {};

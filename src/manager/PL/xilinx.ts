@@ -17,7 +17,7 @@ import { t } from '../../i18n';
 import { HdlFileProjectType } from '../../hdlParser/common';
 import { encodeTclScript, loadTclScript, quoteTcl } from './tcl';
 import { makeVivadoVcdName, makeVivadoVcdScript } from './vcd';
-import { resetWaveFiles } from '../../function/sim/waveOutput';
+import { resetWaveFiles, uniquifyVcdAliases } from '../../function/sim/waveOutput';
 
 interface XilinxCustom {
     ipRepo: AbsPath, 
@@ -811,6 +811,7 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
             throw new Error('Vivado 报告导出完成，但 VCD 文件不存在或为空。');
         }
+        uniquifyVcdAliases(outputPath);
         return outputPath;
     }
 

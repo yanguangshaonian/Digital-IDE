@@ -16,7 +16,7 @@ import { defaultMacro, doFastApi } from '../../hdlParser/util';
 import { t } from '../../i18n';
 import { openWaveViewer } from '../dide-viewer';
 import { HdlDependence } from '../../hdlParser/common';
-import { collectWaveOutput, resetWaveFiles } from './waveOutput';
+import { collectWaveOutput, resetWaveFiles, uniquifyVcdAliases } from './waveOutput';
 import { prjManage } from '../../manager/prj';
 
 type Path = string;
@@ -487,6 +487,7 @@ export class IcarusSimulate extends Simulate {
                             MainOutput.report(`波形归档失败，保留原路径打开：${String(error)}`, { level: ReportType.Warn });
                         }
                     }
+                    uniquifyVcdAliases(absVcdPath);
                     MainOutput.report(t('info.simulate.vvp.vcd-generate', absVcdPath), { level: ReportType.Finish });
                     if (fs.existsSync(absVcdPath)) {
                         openWaveViewer(this.context, vscode.Uri.file(absVcdPath));
