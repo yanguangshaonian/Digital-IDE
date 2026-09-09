@@ -17,6 +17,7 @@ import { t } from '../../i18n';
 import { HdlFileProjectType } from '../../hdlParser/common';
 import { encodeTclScript, loadTclScript, quoteTcl } from './tcl';
 import { makeVivadoVcdName, makeVivadoVcdScript } from './vcd';
+import { resetWaveFiles } from '../../function/sim/waveOutput';
 
 interface XilinxCustom {
     ipRepo: AbsPath, 
@@ -774,13 +775,9 @@ file delete -force ${quoteTcl(scriptPath)}\n`;
         }
         const outputDirectory = hdlPath.join(this.prjPath, 'vivado');
         fs.mkdirSync(outputDirectory, { recursive: true });
-        const token = `${Date.now()}_${++this.scriptSequence}`;
-        const name = makeVivadoVcdName(this.topMod.sim);
-        let outputPath = hdlPath.join(outputDirectory, `${name}.vcd`);
-        let suffix = 1;
-        while (fs.existsSync(outputPath)) {
-            outputPath = hdlPath.join(outputDirectory, `${name}_${suffix++}.vcd`);
-        }
+        const token = `t${++this.scriptSequence}`;
+        const outputPath = hdlPath.join(outputDirectory, `${makeVivadoVcdName(this.topMod.sim)}.vcd`);
+        resetWaveFiles(outputPath);
         const scriptPath = this.scriptPath('export-vcd');
         fs.writeFileSync(scriptPath, encodeTclScript(makeVivadoVcdScript(outputPath, durationNs, token)), 'utf8');
         await new Promise<void>((resolve, reject) => {

@@ -16,7 +16,7 @@ import { defaultMacro, doFastApi } from '../../hdlParser/util';
 import { t } from '../../i18n';
 import { openWaveViewer } from '../dide-viewer';
 import { HdlDependence } from '../../hdlParser/common';
-import { collectWaveOutput } from './waveOutput';
+import { collectWaveOutput, resetWaveFiles } from './waveOutput';
 import { prjManage } from '../../manager/prj';
 
 type Path = string;
@@ -323,6 +323,10 @@ export class IcarusSimulate extends Simulate {
         }
 
         command += ' ' + `-o ${outVvpPath} -s ${name}`;
+        resetWaveFiles(
+            hdlPath.join(simConfig.simulationHome, `${name}.vcd`),
+            hdlPath.join(opeParam.workspacePath, `${name}.vcd`)
+        );
 
         const autoWave = prepareAutoWave(name, [path, ...otherdeps, ...alldeps], simConfig.simulationHome, this.durationNs);
         if (autoWave) {

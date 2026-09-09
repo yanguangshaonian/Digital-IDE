@@ -53,6 +53,8 @@ try {
     for (const invalid of [0, -1, 0.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
         assert.throws(() => exportsObject.prepareAutoWave('tb', [source], temp, invalid), /Invalid simulation duration/);
     }
+    const simulate = fs.readFileSync('src/function/sim/simulate.ts', 'utf8');
+    assert(simulate.includes('resetWaveFiles('));
     const index = fs.readFileSync('src/function/index.ts', 'utf8');
     assert(index.includes("title: 'Icarus Verilog 仿真'"));
     assert(index.includes('if (duration === undefined) { return; }'));

@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { hdlFile, hdlPath } from '../../hdlFs';
 import { opeParam, ReportType, WaveViewOutput } from '../../global';
 import { LaunchFiles, loadView, saveView, saveViewAs } from './api';
+import { forgetWaveLayout } from './waveCache';
 import { BSON } from 'bson';
 import { getIconConfig } from '../../hdlFs/icons';
 import { t } from '../../i18n';
@@ -54,6 +55,7 @@ class WaveViewer {
         const context = this.context;
         const previewHtml = getWebviewContent(context, this.panel);
         if (this.panel && previewHtml) {
+            forgetWaveLayout(uri.fsPath);
             const launchFiles = getViewLaunchFiles(context, uri, this.panel);
             if (launchFiles instanceof Error) {
                 vscode.window.showErrorMessage(launchFiles.message);
@@ -121,6 +123,7 @@ class VcdViewerProvider implements vscode.CustomEditorProvider {
         registerMessageEvent(webviewPanel, document.uri);
 
         if (webviewPanel && previewHtml) {
+            forgetWaveLayout(document.uri.fsPath);
             const launchFiles = getViewLaunchFiles(context, document.uri, webviewPanel);
             if (launchFiles instanceof Error) {
                 vscode.window.showErrorMessage(launchFiles.message);

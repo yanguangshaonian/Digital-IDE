@@ -7,8 +7,11 @@ vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/manager/PL/vcd.ts', '
     compilerOptions: { module: ts.ModuleKind.CommonJS }
 }).outputText, { exports: exportsObject, require: () => ({ quoteTcl: x => JSON.stringify(x) }) });
 const make = exportsObject.makeVivadoVcdScript;
-assert.equal(exportsObject.makeVivadoVcdName('mux2_tb', new Date(2026, 7, 22, 14, 8, 14)), 'mux2_tb_2026_08_22_140814');
-assert.equal(exportsObject.makeVivadoVcdName('tb/invalid', new Date(2026, 0, 2, 3, 4, 5)), 'tb_invalid_2026_01_02_030405');
+assert.equal(exportsObject.makeVivadoVcdName('mux2_tb'), 'mux2_tb');
+assert.equal(exportsObject.makeVivadoVcdName('tb/invalid'), 'tb_invalid');
+const xilinx = fs.readFileSync('src/manager/PL/xilinx.ts', 'utf8');
+assert(xilinx.includes('resetWaveFiles(outputPath)'));
+assert(!xilinx.includes('${Date.now()}'));
 const script = make('project A/prj/vivado/tb.vcd', 2000, 'test_1');
 assert(script.indexOf('restart') < script.indexOf('open_vcd'));
 assert(script.indexOf('log_vcd') < script.indexOf('run 2000 ns'));

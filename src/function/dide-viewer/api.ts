@@ -6,6 +6,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { getIconConfig } from '../../hdlFs/icons';
 import { t } from '../../i18n';
+import { forgetWaveLayout, mergePayloadCache } from './waveCache';
+export { forgetWaveLayout };
 
 export interface SaveViewData {
     originVcdFile: string,
@@ -20,17 +22,6 @@ export interface LaunchFiles {
     worker: string,
     wasm: string,
     root: string
-}
-
-const payloadCache = new Map<string, any>();
-
-function mergePayloadCache(file: string, payload: any) {
-    if (!payloadCache.has(file)) {
-        payloadCache.set(file, payload);
-    }
-    const originPayload = payloadCache.get(file);
-    Object.assign(originPayload, payload);
-    return originPayload;
 }
 
 function extractFilepath(webviewUri: string) {

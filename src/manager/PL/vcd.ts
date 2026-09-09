@@ -1,9 +1,7 @@
 import { quoteTcl } from './tcl';
 
-export function makeVivadoVcdName(top: string, date = new Date()): string {
-    const pad = (value: number) => String(value).padStart(2, '0');
-    const name = (top || 'simulation').replace(/[^a-zA-Z0-9_-]/g, '_');
-    return `${name}_${date.getFullYear()}_${pad(date.getMonth() + 1)}_${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+export function makeVivadoVcdName(top: string): string {
+    return (top || 'simulation').replace(/[^a-zA-Z0-9_-]/g, '_') || 'simulation';
 }
 
 /** Finite capture; restart before logging so initialization is recorded. */
