@@ -1,8 +1,6 @@
 import { parentPort } from 'worker_threads';
-import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
-
 import { WASI } from 'wasi';
 
 type SynthMode = 'before' | 'after' | 'RTL';
@@ -15,271 +13,204 @@ interface SimpleOpe {
     extensionPath: string
 }
 
+function report(command: string, data: Record<string, unknown> = {}) {
+    parentPort?.postMessage({ command, data });
+}
+
 if (parentPort) {
     parentPort.on('message', message => {
         const command = message.command as string;
         const data = message.data;
-
-        switch (command) {
-            case 'open':
-                open(data);
-                break;
-            case 'run':
-                run(data);
-                break;
-            default:
-                break;
-        }
-    });
-}
-
-async function open(data: any) {
-    const { path, moduleName, mode, filelist, ope } = data;
-    const viewer = new Netlist(ope);
-    viewer.open(path, moduleName, filelist, mode);
-}
-
-async function run(data: any) {
-    const { path, ope } = data;
-    const viewer = new Netlist(ope);
-    viewer.runYs(path);
-}
-
-function getDiskLetters(): Promise<string[]> {
-    return new Promise((resolve, reject) => {
-        // 调用 wmic 命令获取磁盘信息
-        childProcess.exec('wmic logicaldisk get name', (error, stdout, stderr) => {
-            if (error) {
-                reject(`Error: ${error.message}`);
-                return;
-            }
-
-            if (stderr) {
-                reject(`Stderr: ${stderr}`);
-                return;
-            }
-
-            // 解析命令输出
-            const disks = stdout
-                .split('\n') // 按行分割
-                .map(line => line.trim()) // 去除每行的空白字符
-                .filter(line => /^[A-Z]:$/.test(line)); // 过滤出盘符（如 C:, D:）
-
-            resolve(disks);
+        const task = command === 'open' ? open(data) : command === 'run' ? run(data) : Promise.resolve();
+        void task.catch(error => {
+            report('error-log-file', { logFilePath: '', error: String(error) });
+            report('finish', { error: String(error) });
         });
     });
 }
 
-function mkdir(path: AbsPath): boolean {
-    if (!path) {
-        return false;
-    }
-    // 如果存在则直接退出
-    if (fs.existsSync(path)) {
-        return true;
-    }
+async function open(data: { moduleName: string, mode: SynthMode, filelist: AbsPath[], ope: SimpleOpe }) {
+    await new Netlist(data.ope).open(data.moduleName, data.filelist, data.mode);
+}
 
-    try {
-        fs.mkdirSync(path, {recursive:true});
-        return true;
-    } 
-    catch (error) {
-        fs.mkdirSync(path, {recursive:true});
+async function run(data: { path: string, ope: SimpleOpe }) {
+    await new Netlist(data.ope).runYs(data.path);
+}
+
+function neededWindowsMounts(paths: string[]): string[] {
+    const letters = new Set<string>();
+    for (const value of paths) {
+        const match = String(value || '').match(/^([A-Za-z]):/);
+        if (match) { letters.add(match[1].toUpperCase() + ':'); }
     }
-    return false;
+    return [...letters];
+}
+
+function mkdir(path: AbsPath): boolean {
+    if (!path) { return false; }
+    if (fs.existsSync(path)) { return true; }
+    fs.mkdirSync(path, { recursive: true });
+    return fs.existsSync(path);
 }
 
 function join(...paths: string[]): AbsPath {
     return paths.join('/');
 }
 
+function appendLog(path: AbsPath, text: string) {
+    mkdir(path.replace(/[\\/][^\\/]+$/, '') || '.');
+    fs.appendFileSync(path, text.endsWith('\n') ? text : text + '\n');
+}
+
 function isVlog(file: AbsPath): boolean {
-    const exts = ['.v', '.vh', '.vl', '.sv'];
-    for (const ext of exts) {
-        if (file.toLowerCase().endsWith(ext)) {
-            return true;
-        }
-    }
-    return false;
+    return ['.v', '.vh', '.vl', '.sv'].some(ext => file.toLowerCase().endsWith(ext));
 }
 
 class Netlist {
-    wsName: string;
-    libName: string;
+    wsName = '{workspace}';
+    libName = '{library}';
     ope: SimpleOpe;
     wasm?: WebAssembly.Module;
 
     constructor(ope: SimpleOpe) {
-        this.wsName = '{workspace}';
-        this.libName = '{library}';
         this.ope = ope;
     }
 
-    public async open(path: string, moduleName: string, filelist: AbsPath[], mode: SynthMode) {
-
-        if (!this.wasm) {
-            const wasm = await this.loadWasm();
-            this.wasm = wasm;
-        }
-
-        const targetYs = this.makeYs(filelist, moduleName, mode);
-        if (!targetYs || !this.wasm) {
-            return;
-        }
-
-        const wasm = this.wasm;
-        const wasiResult = await this.makeWasi(targetYs, moduleName);
-        
-        if (wasiResult === undefined) {
-            return;
-        }
-        const { wasi, fd } = wasiResult;
-
-        const netlistPayloadFolder = join(this.ope.prjPath, 'netlist');
-        const targetJson = join(netlistPayloadFolder, moduleName + '.json');
-        if (fs.existsSync(targetJson)) {
-            fs.rmSync(targetJson);
-        }
-
-        const instance = await WebAssembly.instantiate(wasm, {
-            wasi_snapshot_preview1: wasi.wasiImport
-        });
-        
+    public async open(moduleName: string, filelist: AbsPath[], mode: SynthMode) {
+        const logFilePath = join(this.ope.prjPath, 'netlist', moduleName + '.log');
+        mkdir(join(this.ope.prjPath, 'netlist'));
         try {
-            const exitCode = wasi.start(instance);            
+            const targetYs = this.makeYs(filelist, moduleName, mode);
+            if (!targetYs) {
+                throw new Error('NetList currently supports Verilog/SystemVerilog sources only.');
+            }
+            await this.runYosys(targetYs, logFilePath, join(this.ope.prjPath, 'netlist', moduleName + '.json'));
         } catch (error) {
-            if (parentPort) {
-                parentPort.postMessage({
-                    command: 'finish',
-                    data: { error }
-                });
-            }
+            appendLog(logFilePath, `NetList failed: ${String(error)}`);
+            report('error-log-file', { logFilePath, error: String(error) });
+        } finally {
+            report('finish', {});
         }
+    }
 
-        if (!fs.existsSync(targetJson)) {
-            fs.closeSync(fd);
-            const logFilePath = join(this.ope.prjPath, 'netlist', moduleName + '.log');
-            if (parentPort) {
-                parentPort.postMessage({
-                    command: 'error-log-file',
-                    data: { logFilePath }
-                });
-            }
+    private mapGuestPath(file: AbsPath): string | undefined {
+        const slash = file.replace(/\\/g, '/');
+        if (slash.startsWith(this.ope.workspacePath)) {
+            return slash.replace(this.ope.workspacePath, this.wsName);
         }
-
-        if (parentPort) {
-            parentPort.postMessage({
-                command: 'finish',
-                data: {}
-            });
+        if (this.ope.libCommonPath && slash.startsWith(this.ope.libCommonPath)) {
+            return slash.replace(this.ope.libCommonPath, this.libName);
         }
+        return undefined;
     }
 
     private makeYs(files: AbsPath[], topModule: string, mode: SynthMode) {
-        const netlistPayloadFolder = join(this.ope.prjPath, 'netlist');
-        mkdir(netlistPayloadFolder);
-        const target = join(netlistPayloadFolder, topModule + '.ys');
-        const targetJson = join(netlistPayloadFolder, topModule + '.json').replace(this.ope.workspacePath, this.wsName);
-
+        const folder = join(this.ope.prjPath, 'netlist');
+        mkdir(folder);
+        const target = join(folder, topModule + '.ys');
+        const targetJson = this.mapGuestPath(join(folder, topModule + '.json'));
         const scripts: string[] = [];
-        
+        const includes = new Set<string>();
+        const mapped: string[] = [];
         for (const file of files) {
-            if (!isVlog(file)) {
-                return undefined;
-            }
-
-            if (file.startsWith(this.ope.workspacePath)) {
-                const constraintPath = file.replace(this.ope.workspacePath, this.wsName);
-                scripts.push(`read_verilog -sv -formal -overwrite ${constraintPath}`);
-            } else if (file.startsWith(this.ope.libCommonPath)) {
-                const constraintPath = file.replace(this.ope.libCommonPath, this.libName);
-                scripts.push(`read_verilog -sv -formal -overwrite ${constraintPath}`);
-            }
+            if (!isVlog(file)) { return undefined; }
+            const guest = this.mapGuestPath(file);
+            if (!guest) { continue; }
+            mapped.push(guest);
+            const parent = this.mapGuestPath(file.replace(/[\\/][^\\/]+$/, ''));
+            if (parent) { includes.add(parent); }
         }
-
+        if (!mapped.length || !targetJson) { return undefined; }
+        for (const directory of includes) {
+            scripts.push(`verilog_defaults -add -I ${directory}`);
+        }
+        for (const guest of mapped) {
+            scripts.push(`read_verilog -sv -formal -overwrite ${guest}`);
+        }
         switch (mode) {
-        case 'before':
-            scripts.push('design -reset-vlog; proc;');
-            break;
-        case 'after':
-            scripts.push('design -reset-vlog; proc; opt_clean;');
-            break;
-        case 'RTL':
-            scripts.push('synth -run coarse;');
-            break;
+            case 'before':
+                scripts.push('design -reset-vlog; proc;');
+                break;
+            case 'after':
+                scripts.push('design -reset-vlog; proc; opt_clean;');
+                break;
+            case 'RTL':
+                scripts.push('synth -run coarse;');
+                break;
         }
+        scripts.push(`hierarchy -top ${topModule}`);
         scripts.push(`write_json ${targetJson}`);
-        const ysCode = scripts.join('\n');
-        fs.writeFileSync(target, ysCode, { encoding: 'utf-8' });
-        return target.replace(this.ope.workspacePath, this.wsName);
+        fs.writeFileSync(target, scripts.join('\n') + '\n', { encoding: 'utf-8' });
+        return this.mapGuestPath(target);
     }
 
-    public async getPreopens() {
-        const basepreopens = {
+    public getPreopens() {
+        const preopens: Record<string, string> = {
             '/share': join(this.ope.extensionPath, 'resources', 'dide-netlist', 'static', 'share'),
-            [this.wsName ]: this.ope.workspacePath,
-            [this.libName]: this.ope.libCommonPath
+            [this.wsName]: this.ope.workspacePath,
+            [this.libName]: this.ope.libCommonPath || this.ope.workspacePath
         };
         if (os.platform() === 'win32') {
-            const mounts = await getDiskLetters();
-            for (const mountName of mounts) {
-                const realMount = mountName + '/';
-                basepreopens[realMount.toLowerCase()] = realMount;
-                basepreopens[realMount.toUpperCase()] = realMount;
+            for (const letter of neededWindowsMounts([
+                this.ope.workspacePath, this.ope.libCommonPath, this.ope.extensionPath, this.ope.prjPath
+            ])) {
+                preopens[letter + '/'] = letter + '/';
+                preopens[letter.toLowerCase() + '/'] = letter + '/';
             }
         } else {
-            basepreopens['/'] = '/';
+            preopens['/'] = '/';
         }
-        return basepreopens;
+        return preopens;
     }
 
-    private async makeWasi(target: string, logName: string) {
-        // 创建日志文件路径
-        const logFilePath = join(this.ope.prjPath, 'netlist', logName + '.log');
-        if (fs.existsSync(logFilePath)) {
-            fs.rmSync(logFilePath)
-        }
+    private async runYosys(script: string, logFilePath: string, targetJson?: string) {
+        mkdir(join(this.ope.prjPath, 'netlist'));
+        appendLog(logFilePath, `yosys -s ${script}`);
+        if (targetJson && fs.existsSync(targetJson)) { fs.rmSync(targetJson, { force: true }); }
+        if (!this.wasm) { this.wasm = await this.loadWasm(); }
+        const stdinFd = fs.openSync(os.devNull, 'r');
         const logFd = fs.openSync(logFilePath, 'a');
-
         try {
-            const wasiOption = {
+            const wasi = new WASI({
                 version: 'preview1',
-                args: [
-                    'yosys',
-                    '-s',
-                    target
-                ],
-                preopens: await this.getPreopens(),
-                stdin: process.stdin.fd,
-                stdout: process.stdout.fd,
+                args: ['yosys', '-s', script],
+                preopens: this.getPreopens(),
+                stdin: stdinFd,
+                stdout: logFd,
                 stderr: logFd,
-                env: process.env
-            };
-
-            const wasi = new WASI(wasiOption);
-            return { wasi, fd: logFd };
-        } catch (error) {
+                env: {}
+            } as ConstructorParameters<typeof WASI>[0]);
+            const instance = await WebAssembly.instantiate(this.wasm, {
+                wasi_snapshot_preview1: wasi.wasiImport
+            });
+            try {
+                wasi.start(instance);
+            } catch (error) {
+                if (!/WASIProcExit|proc_exit|exit_code/i.test(String(error))) { throw error; }
+            }
+        } finally {
+            fs.closeSync(stdinFd);
             fs.closeSync(logFd);
-            return undefined;
+        }
+        if (targetJson && !fs.existsSync(targetJson)) {
+            const yosys = fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, 'utf8').trim() : '';
+            throw new Error(yosys || `Yosys did not write ${targetJson}`);
         }
     }
 
     private async loadWasm() {
-        const netlistWasmPath = join(this.ope.extensionPath, 'resources', 'dide-netlist', 'static', 'yosys.wasm');
-        const binary = fs.readFileSync(netlistWasmPath);
-        const wasm = await WebAssembly.compile(binary);
-        return wasm;
+        return WebAssembly.compile(new Uint8Array(fs.readFileSync(join(this.ope.extensionPath, 'resources', 'dide-netlist', 'static', 'yosys.wasm'))));
     }
 
     public getJsonPathFromYs(path: AbsPath): AbsPath | undefined {
         for (const line of fs.readFileSync(path, { encoding: 'utf-8' }).split('\n')) {
             if (line.trim().startsWith('write_json')) {
-                const path = line.split(/\s+/).at(1);
-                if (path) {
-                    const realPath = path
+                const guest = line.split(/\s+/).at(1);
+                if (guest) {
+                    return guest
                         .replace(this.wsName, this.ope.workspacePath)
-                        .replace(this.libName, this.ope.libCommonPath);
-                    return realPath.replace(/\\/g,"\/");
+                        .replace(this.libName, this.ope.libCommonPath)
+                        .replace(/\\/g, '/');
                 }
             }
         }
@@ -287,58 +218,17 @@ class Netlist {
     }
 
     public async runYs(path: string) {
-        const ysPath = path.replace(/\\/g,"\/");
-        const targetJson = this.getJsonPathFromYs(ysPath);
+        const ysPath = path.replace(/\\/g, '/');
         const name = ysPath.split('/').at(-1) as string;
-        const wasiResult = await this.makeWasi(ysPath, name);
-        
-        if (wasiResult === undefined) {
-            return;
-        }
-        const { wasi, fd } = wasiResult;
-
-        if (targetJson && fs.existsSync(targetJson)) {
-            fs.rmSync(targetJson);
-        }
-
-        if (!this.wasm) {
-            const wasm = await this.loadWasm();
-            this.wasm = wasm;
-        }
-        const wasm = this.wasm;
-
-        const instance = await WebAssembly.instantiate(wasm, {
-            wasi_snapshot_preview1: wasi.wasiImport
-        });
-
-
+        const logFilePath = join(this.ope.prjPath, 'netlist', name + '.log');
+        mkdir(join(this.ope.prjPath, 'netlist'));
         try {
-            const exitCode = wasi.start(instance);
+            await this.runYosys(ysPath, logFilePath, this.getJsonPathFromYs(ysPath));
         } catch (error) {
-            if (parentPort) {
-                parentPort.postMessage({
-                    command: 'finish',
-                    data: { error }
-                });
-            }
-        }
-
-        if (targetJson && !fs.existsSync(targetJson)) {
-            fs.closeSync(fd);
-            const logFilePath = join(this.ope.prjPath, 'netlist', name + '.log');
-            if (parentPort) {
-                parentPort.postMessage({
-                    command: 'error-log-file',
-                    data: { logFilePath }
-                });
-            }
-        }
-
-        if (parentPort) {
-            parentPort.postMessage({
-                command: 'finish',
-                data: {}
-            });
+            appendLog(logFilePath, `NetList failed: ${String(error)}`);
+            report('error-log-file', { logFilePath, error: String(error) });
+        } finally {
+            report('finish', {});
         }
     }
 }

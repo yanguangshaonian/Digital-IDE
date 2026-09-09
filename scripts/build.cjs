@@ -82,6 +82,9 @@ async function build() {
             });
         });
     });
+    const netlistWorker = path.join(stage, 'out', 'function', 'dide-netlist', 'worker.js');
+    fs.mkdirSync(path.dirname(netlistWorker), { recursive: true });
+    fs.copyFileSync(path.join(compiled, 'function', 'dide-netlist', 'worker.js'), netlistWorker);
     for (const name of ['config', 'css', 'fonts', 'images', 'l10n', 'project', 'resources', 'snippets', 'syntaxes',
         'README.md', 'CHANGELOG.md', 'LICENSE', ...fs.readdirSync(root).filter(n => /^package\.nls.*\.json$/.test(n))]) {
         fs.cpSync(path.join(root, name), path.join(stage, name), {
@@ -106,7 +109,7 @@ async function build() {
         cli('@vscode/vsce/vsce', ['package', '--no-dependencies', '--out', temporary], stage);
         const Zip = require('adm-zip');
         const zip = new Zip(temporary);
-        for (const file of ['package.json', 'out/extension.js', ...required]) {
+        for (const file of ['package.json', 'out/extension.js', 'out/function/dide-netlist/worker.js', ...required]) {
             const entry = zip.getEntry(`extension/${file}`);
             if (!entry || entry.header.size === 0) { throw new Error(`VSIX missing ${file}`); }
         }

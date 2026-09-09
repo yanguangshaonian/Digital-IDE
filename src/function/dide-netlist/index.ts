@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as fspath from 'path';
 import { Worker } from 'worker_threads';
 import { hdlFile, hdlPath } from '../../hdlFs';
@@ -152,14 +153,46 @@ function registerMessageEvent(panel: vscode.WebviewPanel) {
     });
 }
 
-function waitForFinish(worker: Worker): Promise<void> {
-    return new Promise<void>(resolve => {
-        worker.on('message', message => {
-            if (message.command === 'finish') {
-                resolve();
+async function runWorker(worker: Worker, request: unknown): Promise<boolean> {
+    let success = true;
+    await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: t('info.netlist.generate-network'),
+        cancellable: true
+    }, (_, token) => new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const finish = (error?: Error) => {
+            if (settled) { return; }
+            settled = true;
+            clearTimeout(timer);
+            cancellation.dispose();
+            worker.removeListener('message', onMessage);
+            worker.removeListener('error', onError);
+            worker.removeListener('exit', onExit);
+            void worker.terminate();
+            if (error) { reject(error); } else { resolve(); }
+        };
+        const onError = (error: Error) => finish(error);
+        const onExit = (code: number) => {
+            if (!settled) { finish(new Error(`NetList worker exited before completion (code ${code}).`)); }
+        };
+        const onMessage = (message: any) => {
+            if (message.command === 'error-log-file') {
+                success = false;
+                void showErrorLogFile(message.data);
+            } else if (message.command === 'finish') {
+                finish();
             }
-        });
-    });
+        };
+        const timer = setTimeout(() => finish(new Error('NetList generation timed out after 120 seconds.')), 120000);
+        const cancellation = token.onCancellationRequested(() => finish(new vscode.CancellationError()));
+        worker.on('message', onMessage);
+        worker.once('error', onError);
+        worker.once('exit', onExit);
+        if (token.isCancellationRequested) { finish(new vscode.CancellationError()); return; }
+        try { worker.postMessage(request); } catch (error) { finish(error instanceof Error ? error : new Error(String(error))); }
+    }));
+    return success;
 }
 
 function checkResource() {
@@ -173,31 +206,11 @@ function checkResource() {
 export async function openNetlistViewer(context: vscode.ExtensionContext, uri: vscode.Uri, moduleName: string) {
     checkResource();
     const workerScriptPath = hdlPath.join(opeParam.extensionPath, 'out', 'function', 'dide-netlist', 'worker.js');
-    const worker = new Worker(workerScriptPath);
-    let success = true;
-    
-    worker.on('message', message => {
-        const command = message.command;
-        const data = message.data;
-        switch (command) {
-            case 'error-log-file':
-                showErrorLogFile(data);
-                success = false;
-                break;
-            case 'finish':
-                
-                break;
-            default:
-                break;
-        }
-    });
-
     const configuration = vscode.workspace.getConfiguration();
     const mode = configuration.get<SynthMode>('digital-ide.function.netlist.schema-mode') || 'before';
     const filelist = await generateFilelist(uri.fsPath);
     const ope = generateOpe();
-
-    worker.postMessage({
+    const generated = await runWorker(new Worker(workerScriptPath), {
         command: 'open',
         data: {
             path: uri.fsPath,
@@ -206,78 +219,39 @@ export async function openNetlistViewer(context: vscode.ExtensionContext, uri: v
             ope
         }
     });
-
-    await vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: t('info.netlist.generate-network'),
-        cancellable: true
-    }, async (_, token) => {
-        token.onCancellationRequested(() => {
-            worker.terminate();
-        });
-
-        await waitForFinish(worker);
-    });
-
-    worker.terminate();
-
-    if (success) {
+    if (generated) {
         const render = new NetlistRender();
         render.create(moduleName);
     }
 }
 
 async function showErrorLogFile(data: any) {
-    const { logFilePath } = data;
+    const { logFilePath, error } = data || {};
+    const saved = logFilePath && fs.existsSync(logFilePath) ? fs.readFileSync(logFilePath, 'utf8').trim() : '';
+    const detail = [error, saved].filter(Boolean).join('\n');
     const res = await vscode.window.showErrorMessage(
-        t('error.cannot-gen-netlist'),
+        t('error.cannot-gen-netlist') + (detail ? `\n${detail.slice(0, 500)}` : ''),
         { title: t('error.look-up-log'), value: true }
-    )
+    );
     if (res?.value) {
-        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFilePath));
-        await vscode.window.showTextDocument(document);
+        if (logFilePath && fs.existsSync(logFilePath)) {
+            const document = await vscode.workspace.openTextDocument(vscode.Uri.file(logFilePath));
+            await vscode.window.showTextDocument(document);
+        } else {
+            vscode.window.showErrorMessage(error ? String(error) : 'NetList log file was not written.');
+        }
     }
 }
 
 export async function runYsScript(context: vscode.ExtensionContext, uri: vscode.Uri) {
     checkResource();
     const workerScriptPath = hdlPath.join(opeParam.extensionPath, 'out', 'function', 'dide-netlist', 'worker.js');
-    const worker = new Worker(workerScriptPath);
-
-    worker.on('message', message => {
-        const command = message.command;
-        const data = message.data;
-        switch (command) {
-            case 'error-log-file':
-                showErrorLogFile(data);
-                break;
-        
-            default:
-                break;
-        }
-    });
-
     const ope = generateOpe();
-
-    worker.postMessage({
+    await runWorker(new Worker(workerScriptPath), {
         command: 'run',
         data: {
             path: uri.fsPath,
             ope
         }
     });
-
-    await vscode.window.withProgress({
-        location: vscode.ProgressLocation.Notification,
-        title: t('info.netlist.generate-network'),
-        cancellable: true
-    }, async (_, token) => {
-        token.onCancellationRequested(() => {
-            worker.terminate();
-        });
-
-        await waitForFinish(worker);
-    });
-
-    worker.terminate();
 }
